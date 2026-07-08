@@ -28,6 +28,16 @@ SLIPPAGE = 0.0003
 DEFAULT_FUNDING = 0.0001  # oran verisi yoksa: 0.01% / 8h, long oder
 
 
+def timeframe_hours(tf: str) -> int:
+    """'4h' -> 4, '1h' -> 1, '1d' -> 24"""
+    tf = tf.strip().lower()
+    if tf.endswith("d"):
+        return int(tf[:-1]) * 24
+    if tf.endswith("h"):
+        return int(tf[:-1])
+    raise ValueError(f"desteklenmeyen timeframe: {tf}")
+
+
 @dataclass
 class Position:
     symbol: str
@@ -81,8 +91,8 @@ class Backtester:
         self.data = {sym: add_indicators(df, cfg) for sym, df in data.items()}
         # stop sonrasi ayni yone yeniden giris yasagi: (symbol, sleeve) -> (side, yasak bitis ts)
         self.cooldowns = {}
-        bar_hours = int(cfg.timeframe.rstrip("h"))  # "4h" -> 4, "1h" -> 1
-        self.cooldown_delta = pd.Timedelta(hours=bar_hours * cfg.cooldown_bars)
+        self.bar_hours = timeframe_hours(cfg.timeframe)
+        self.cooldown_delta = pd.Timedelta(hours=self.bar_hours * cfg.cooldown_bars)
         self.start_equity = start_equity
         self.cash = start_equity
         self.positions = {}  # (symbol, sleeve) -> Position
@@ -167,8 +177,18 @@ class Backtester:
                         rows[sym] = df.iloc[loc]
                         marks[sym] = float(df.iloc[loc].close)
 
-            # 1) funding tahsilati (8 saatlik grid, pozisyon nominali uzerinden)
-            if ts.hour in (0, 8, 16) and ts.minute == 0:
+            # 1) funding tahsilati (8 saatlik grid; gunluk barlarda gunun 3 periyodu toplanir)
+            if self.bar_hours >= 24:
+                for pos in self.positions.values():
+                    s = self.funding.get(pos.symbol)
+                    window = s.loc[ts:ts + pd.Timedelta(hours=self.bar_hours)] if s is not None and len(s) else None
+                    rate = float(window.sum()) if window is not None and len(window) else \
+                        DEFAULT_FUNDING * 3 * (self.bar_hours / 24)
+                    mark = marks.get(pos.symbol, pos.entry)
+                    cost = rate * pos.qty * mark * (1 if pos.side == LONG else -1)
+                    pos.funding_paid += cost
+                    self.cash -= cost
+            elif ts.hour in (0, 8, 16) and ts.minute == 0:
                 for pos in self.positions.values():
                     rate = self._funding_rate(pos.symbol, ts)
                     mark = marks.get(pos.symbol, pos.entry)

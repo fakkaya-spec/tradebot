@@ -17,9 +17,12 @@ from bot.config import Config
 from bot.strategy import SLEEVES
 
 from . import data as data_mod
-from .engine import Backtester, metrics
+from .engine import Backtester, metrics, timeframe_hours
 
-WARMUP_DAYS = 45  # pencere basina isinma payi (EMA200 + vol penceresi ~34 gun)
+
+def warmup_days(timeframe: str) -> int:
+    """Isinma payi: 200 bar (EMA200 + vol penceresi) + guvenlik payi, takvim gunu olarak."""
+    return int(200 * timeframe_hours(timeframe) / 24) + 12
 
 
 def legacy_cfg(cfg):
@@ -27,19 +30,19 @@ def legacy_cfg(cfg):
                                enable_vol_target=False)
 
 
-def slice_window(data, funding, start, end):
+def slice_window(data, funding, start, end, wu_days):
     """Veriyi [start - warmup, end) araligina indirger; warmup payi motorun
     isinmasi icindir, islemler start civarinda baslar."""
     d, f = {}, {}
     for sym, df in data.items():
-        lo = (start - pd.Timedelta(days=WARMUP_DAYS)) if start is not None else None
+        lo = (start - pd.Timedelta(days=wu_days)) if start is not None else None
         d[sym] = df.loc[lo:end]
         f[sym] = funding[sym].loc[lo:end] if len(funding[sym]) else funding[sym]
     return d, f
 
 
 def run_window(cfg, data, funding, start, end, equity):
-    d, f = slice_window(data, funding, start, end)
+    d, f = slice_window(data, funding, start, end, warmup_days(cfg.timeframe))
     return Backtester(d, f, cfg, start_equity=equity).run()
 
 
@@ -113,7 +116,8 @@ def main():
     data, funding = {}, {}
     for sym in symbols:
         print(f"{sym}: veri yukleniyor...")
-        k, f = data_mod.load(sym, cfg.timeframe, args.days + WARMUP_DAYS, use_cache=not args.no_cache)
+        k, f = data_mod.load(sym, cfg.timeframe, args.days + warmup_days(cfg.timeframe),
+                             use_cache=not args.no_cache)
         data[sym], funding[sym] = k, f
         print(f"  {len(k)} mum, {len(f)} funding kaydi")
 
