@@ -20,15 +20,21 @@ kullanır:
 | Yönetim | 1.5×ATR kârda başabaş, sonra 3×ATR iz süren stop | 10 günlük karşı kanal kapanışında çıkış | Orta banda dönüşte kâr al |
 | Çıkış | EMA kesişimi tersine dönerse | Donchian exit kanalı | Bollinger orta bandı |
 
-### v2 deneyi (varsayılan KAPALI — holdout sınavını geçemedi)
+### v2 deneyi: izole holdout (2025+) sınavı sonuçları
 
-Rejim kapılaması, meanrev kolu ve volatilite hedeflemesi denendi ve
-görülmemiş dönem (2025+) karşılaştırmasında v1'in gerisinde kaldı
-(holdout: v1 +%49.3 / v2 +%10.1). Kural gereği reddedildi; kod, bileşenleri
-izole test edebilmek için duruyor. Açmak için (önerilmez):
-`ENABLE_REGIME`, `ENABLE_MEANREV`, `ENABLE_VOL_TARGET` env değişkenleri.
-MEANREV satırı ve rejim davranışı yukarıdaki tabloda yalnızca bu bayraklar
-açıkken geçerlidir.
+Üç aday özellik görülmemiş dönemde tek tek test edildi (çıta: v1 +%49.3,
+DD -%18.9, PF 1.37):
+
+- **Volatilite hedeflemesi — KABUL (varsayılan açık):** +%64.0, PF 1.47,
+  aynı işlem sayısı. Pozisyon riski, göreli ATR'nin kendi medyanına oranıyla
+  0.5×–1.5× ölçeklenir: sakin piyasada büyük, çalkantılıda küçük pozisyon.
+- **Rejim kapılaması — RED:** holdout +%7.6, PF 1.07. Geciken ADX
+  sınıflaması iyi girişleri kesiyor. (`ENABLE_REGIME` ile açılabilir, önerilmez)
+- **Meanrev kolu — RED:** eğitimde de holdout'ta da zararda; kripto 4h'de
+  "yatay" dönemler bile patlamalı. (`ENABLE_MEANREV` ile açılabilir, önerilmez)
+
+MEANREV satırı ve rejim davranışı yukarıdaki tabloda yalnızca ilgili
+bayraklar açıkken geçerlidir.
 
 Ek filtreler:
 - **Makro yön filtresi:** fiyat EMA200(4h) üstündeyken sadece long, altındayken
