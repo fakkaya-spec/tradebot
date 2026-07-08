@@ -63,6 +63,36 @@ def fixed_capital_report(rets: pd.Series, base: float):
     print(line)
 
 
+def floor_refill_path(rets, base: float):
+    """Taban tamamlama modu: ay sonunda bakiye taban altina dustuyse cepten
+    tabana tamamlanir; ustundeyse dokunulmaz (bilesik calisir).
+    (equity_serisi, toplam_tamamlama, tamamlama_sayisi) dondurur."""
+    equity, deposits, refills = base, 0.0, 0
+    path = []
+    for r in rets:
+        equity *= 1.0 + r
+        if equity < base:
+            deposits += base - equity
+            equity = base
+            refills += 1
+        path.append(equity)
+    return path, deposits, refills
+
+
+def floor_refill_report(rets: pd.Series, base: float):
+    path, deposits, refills = floor_refill_path(rets.to_numpy(), base)
+    final = path[-1]
+    net = final - base - deposits
+    line = "=" * 66
+    print(line)
+    print(f"  TABAN TAMAMLAMA MODU  ({base:,.0f} alti tamamlanir, ustu bilesik birakilir)")
+    print(line)
+    print(f"  Son bakiye           : {final:>12,.0f} USDT")
+    print(f"  Cepten tamamlanan    : {deposits:>12,.0f} USDT  ({refills} ay tamamlama gerekti)")
+    print(f"  NET SONUC            : {net:>+12,.0f} USDT")
+    print(line)
+
+
 def block_bootstrap_years(rets: np.ndarray, sims: int, horizon: int, rng) -> np.ndarray:
     """(sims, horizon) aylik getiri matrisi - BLOCK'lu diziler korunarak."""
     n = len(rets)
@@ -104,6 +134,23 @@ def mc_report(rets: pd.Series, base: float, sims: int, rng):
     print(f"    kotu %5 / MEDYAN / iyi %95   : {pct(fixed_net, 5):+,.0f} / "
           f"{pct(fixed_net, 50):+,.0f} / {pct(fixed_net, 95):+,.0f} USDT")
     print(f"    Eksi yil olasiligi           : %{(fixed_net < 0).mean()*100:.0f}")
+
+    # Taban tamamlama modu: yil boyu ay ay simule edilir
+    equity = np.full(sims, base)
+    deposits = np.zeros(sims)
+    for m in range(years.shape[1]):
+        equity = equity * (1 + years[:, m])
+        short = np.maximum(0.0, base - equity)
+        deposits += short
+        equity += short
+    floor_net = equity - base - deposits
+    print(f"  TABAN TAMAMLAMA MODU (yillik, {base:,.0f} taban):")
+    print(f"    net kotu %5 / MEDYAN / iyi %95: {pct(floor_net, 5):+,.0f} / "
+          f"{pct(floor_net, 50):+,.0f} / {pct(floor_net, 95):+,.0f} USDT")
+    print(f"    Yil icinde tamamlama gerekme olasiligi: %{(deposits > 0).mean()*100:.0f}")
+    print(f"    Tamamlama gerektiginde medyan tutar   : "
+          f"{np.median(deposits[deposits > 0]) if (deposits > 0).any() else 0:,.0f} USDT")
+    print(f"    Eksi yil olasiligi           : %{(floor_net < 0).mean()*100:.0f}")
     print(line)
     print("  Not: Gecmis aylik getiriler evren kabul edilir; gelecegin rejimi bu")
     print("  evrenden farkliysa (orn. trend'siz yillar) gercek dagilim daha kotu")
@@ -120,6 +167,7 @@ def main():
 
     rets = monthly_returns(args.days, args.equity)
     fixed_capital_report(rets, args.equity)
+    floor_refill_report(rets, args.equity)
     mc_report(rets, args.equity, args.sims, np.random.default_rng(args.seed))
 
 
