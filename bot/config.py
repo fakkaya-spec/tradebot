@@ -66,4 +66,11 @@ class Config:
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     heartbeat: bool = _bool("HEARTBEAT", "true")  # her donguden sonra kisa nabiz mesaji
 
+    # Cekirdek (spot) uyarilari: EMA200 gecislerinde Telegram'dan haber ver.
+    # Spot islemi bot YAPMAZ - kullanici elle yapar (70/30 cekirdek+uydu yapisi).
+    core_alerts: bool = _bool("CORE_ALERTS", "true")
+    core_symbols: tuple = tuple(
+        s.strip() for s in os.getenv("CORE_SYMBOLS", "BTC/USDT,ETH/USDT").split(",") if s.strip()
+    )
+
     state_dir: str = os.getenv("STATE_DIR", "state")

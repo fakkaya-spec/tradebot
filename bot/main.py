@@ -41,6 +41,7 @@ class State:
         self.path = path
         self.positions = {}  # "SYMBOL|sleeve" -> dict
         self.cooldowns = {}  # "SYMBOL|sleeve" -> {"side": ..., "until": iso}
+        self.core = {}       # "SYMBOL" -> "coin" | "cash" (spot cekirdek durumu)
         self.paper_equity = PAPER_START_EQUITY
         self.load()
 
@@ -50,6 +51,7 @@ class State:
                 data = json.load(f)
             self.positions = data.get("positions", {})
             self.cooldowns = data.get("cooldowns", {})
+            self.core = data.get("core", {})
             self.paper_equity = data.get("paper_equity", PAPER_START_EQUITY)
 
     def save(self):
@@ -57,8 +59,32 @@ class State:
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"positions": self.positions, "cooldowns": self.cooldowns,
-                       "paper_equity": self.paper_equity}, f, indent=2)
+                       "core": self.core, "paper_equity": self.paper_equity}, f, indent=2)
         os.replace(tmp, self.path)
+
+
+def check_core_alerts(ex, cfg, notifier, state):
+    """Spot cekirdek (70/30 yapinin %30'u) icin EMA200 gecis uyarilari.
+    Islem YAPMAZ; sadece durum degisince Telegram'dan haber verir."""
+    for symbol in cfg.core_symbols:
+        try:
+            df = fetch_ohlcv_df(ex, symbol, cfg.timeframe, limit=500)
+            close = df["close"]
+            ema200 = close.ewm(span=cfg.ema_macro, adjust=False).mean()
+            now_state = "coin" if float(close.iloc[-1]) > float(ema200.iloc[-1]) else "cash"
+            prev = state.core.get(symbol)
+            if prev is None:
+                state.core[symbol] = now_state
+                notifier.send(f"CEKIRDEK baslangic durumu {symbol}: "
+                              f"{'COIN tutulmali (EMA200 ustunde)' if now_state == 'coin' else 'USDT beklenmeli (EMA200 altinda)'}")
+            elif now_state != prev:
+                state.core[symbol] = now_state
+                if now_state == "coin":
+                    notifier.send(f"CEKIRDEK SINYALI {symbol}: EMA200 USTUNE kapandi -> spot AL")
+                else:
+                    notifier.send(f"CEKIRDEK SINYALI {symbol}: EMA200 ALTINA kapandi -> spot SAT, USDT'ye gec")
+        except Exception as exc:
+            log.warning("%s cekirdek kontrolu basarisiz: %s", symbol, exc)
 
 
 def sleep_until_next_close():
@@ -226,6 +252,8 @@ def main():
                 except Exception as exc:
                     log.exception("%s islenirken hata", symbol)
                     notifier.send(f"HATA {symbol}: {exc}")
+            if cfg.core_alerts:
+                check_core_alerts(ex, cfg, notifier, state)
             state.save()
             if cfg.heartbeat:
                 pos_txt = ", ".join(
