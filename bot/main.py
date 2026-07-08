@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
 from .exchange import (adjust_quantity, assert_key_safety, current_funding_rate,
@@ -307,6 +307,16 @@ def main():
                             "start_equity": kill_switch.month_start_equity,
                             "tripped": kill_switch.tripped}
             state.save()
+            # Kritik tarih hatirlatmalari: son 7 gun boyunca gunde bir kez
+            if now.hour == cfg.heartbeat_hour:
+                for date_s, msg in cfg.reminders:
+                    try:
+                        days_left = (date.fromisoformat(date_s) - now.date()).days
+                    except ValueError:
+                        continue
+                    if 0 <= days_left <= 7:
+                        notifier.send(f"!!! ACIL HATIRLATMA ({days_left} gun kaldi): {msg}")
+
             # Nabiz gunde BIR kez atilir (heartbeat_hour'daki dongude) - islem,
             # cekirdek ve hata bildirimleri her zaman aninda gider.
             if cfg.heartbeat and now.hour == cfg.heartbeat_hour:

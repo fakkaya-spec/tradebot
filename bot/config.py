@@ -11,6 +11,16 @@ def _bool(name: str, default: str = "true") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 
+def _reminders(raw: str) -> tuple:
+    """'YYYY-MM-DD|mesaj;YYYY-MM-DD|mesaj' formatini cozer."""
+    out = []
+    for item in raw.split(";"):
+        if "|" in item:
+            date_s, msg = item.split("|", 1)
+            out.append((date_s.strip(), msg.strip()))
+    return tuple(out)
+
+
 @dataclass(frozen=True)
 class Config:
     api_key: str = os.getenv("BINANCE_API_KEY", "")
@@ -75,3 +85,12 @@ class Config:
     )
 
     state_dir: str = os.getenv("STATE_DIR", "state")
+
+    # Kritik tarih hatirlatmalari: hedef tarihten 7 gun once baslayarak her gun
+    # (nabiz saatinde) Telegram'dan ACIL HATIRLATMA gonderilir.
+    reminders: tuple = _reminders(os.getenv(
+        "REMINDERS",
+        "2026-08-04|Railway deneme kredisi bitmek uzere! Hobby plana ($5/ay) gecmezsen bot DURUR.;"
+        "2026-10-04|Binance API anahtari 90 gunluk omrunu dolduruyor (IP kisitsiz anahtarlar otomatik kapanir). "
+        "Yeni anahtar olustur, Railway Variables'a gir - yoksa bot emir atamaz!",
+    ))
