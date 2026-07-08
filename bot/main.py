@@ -285,6 +285,25 @@ def main():
             marks = {}
             now = datetime.now(timezone.utc)
             equity = get_equity(ex, cfg, state)
+
+            # Ay kapanisi: rapor + taban tamamlama talimati (nihai para yonetimi)
+            prev_month = kill_switch.month
+            prev_start = kill_switch.month_start_equity
+            if prev_month is not None and (now.year, now.month) != prev_month:
+                pnl = equity - prev_start
+                pct = pnl / prev_start * 100 if prev_start else 0.0
+                lines = [f"AY KAPANDI {prev_month[0]}-{prev_month[1]:02d}: "
+                         f"{prev_start:,.2f} -> {equity:,.2f} USDT ({pnl:+,.2f} / {pct:+.1f}%)"]
+                if cfg.capital_base > 0:
+                    if equity < cfg.capital_base:
+                        lines.append(f"TABAN KONTROLU: cepten {cfg.capital_base - equity:,.2f} USDT "
+                                     "tamamla (Binance -> Futures cuzdanina transfer). "
+                                     "Plan geregi: eksi ay normaldir, bot calismaya devam ediyor.")
+                    else:
+                        lines.append(f"TABAN KONTROLU: bakiye tabanin ({cfg.capital_base:,.0f}) ustunde "
+                                     "- DOKUNMA, bilesik calissin.")
+                notifier.send("\n".join(lines))
+
             if kill_switch.update(now, equity):
                 notifier.send(f"KILL-SWITCH: aylik zarar limiti asildi (ozsermaye {equity:.2f}). "
                               "Tum pozisyonlar kapatiliyor, ay sonuna kadar islem yok.")

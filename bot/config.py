@@ -86,6 +86,11 @@ class Config:
 
     state_dir: str = os.getenv("STATE_DIR", "state")
 
+    # Taban tamamlama disiplini (nihai para yonetimi karari):
+    # her ay kapanisinda Telegram'dan rapor + talimat gonderilir.
+    # Bakiye tabanin ALTINDAYSA cepten tamamlanir, USTUNDEYSE dokunulmaz.
+    capital_base: float = float(os.getenv("CAPITAL_BASE", "1085"))
+
     # Kritik tarih hatirlatmalari: hedef tarihten 7 gun once baslayarak her gun
     # (nabiz saatinde) Telegram'dan ACIL HATIRLATMA gonderilir.
     reminders: tuple = _reminders(os.getenv(
