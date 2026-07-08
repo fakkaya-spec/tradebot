@@ -20,15 +20,15 @@ kullanır:
 | Yönetim | 1.5×ATR kârda başabaş, sonra 3×ATR iz süren stop | 10 günlük karşı kanal kapanışında çıkış | Orta banda dönüşte kâr al |
 | Çıkış | EMA kesişimi tersine dönerse | Donchian exit kanalı | Bollinger orta bandı |
 
-### v2: Rejim kapılaması ve volatilite hedeflemesi
+### v2 deneyi (varsayılan KAPALI — holdout sınavını geçemedi)
 
-Her bar üç rejimden birine sınıflanır (ADX + EMA200 tarafı + EMA200 eğimi):
-**trend-yukarı / trend-aşağı / yatay**. Trend kolu sadece kendi yönündeki
-trend rejiminde, meanrev kolu sadece yatay rejimde açılır; breakout kolu
-karşı-trend rejiminde açılamaz (yatayda serbest — kırılım çoğu zaman ADX
-henüz "yatay" derken gerçekleşir). Volatilite hedeflemesi pozisyon riskini
-piyasa çalkantısıyla ters orantılı ölçekler (0.5×–1.5×).
-Tümü env ile kapatılabilir: `ENABLE_REGIME`, `ENABLE_MEANREV`, `ENABLE_VOL_TARGET`.
+Rejim kapılaması, meanrev kolu ve volatilite hedeflemesi denendi ve
+görülmemiş dönem (2025+) karşılaştırmasında v1'in gerisinde kaldı
+(holdout: v1 +%49.3 / v2 +%10.1). Kural gereği reddedildi; kod, bileşenleri
+izole test edebilmek için duruyor. Açmak için (önerilmez):
+`ENABLE_REGIME`, `ENABLE_MEANREV`, `ENABLE_VOL_TARGET` env değişkenleri.
+MEANREV satırı ve rejim davranışı yukarıdaki tabloda yalnızca bu bayraklar
+açıkken geçerlidir.
 
 Ek filtreler:
 - **Makro yön filtresi:** fiyat EMA200(4h) üstündeyken sadece long, altındayken

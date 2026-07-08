@@ -46,10 +46,12 @@ class Config:
     donchian_exit: int = 60    # 4h barda 10 gun
     ema_macro: int = 200       # makro yon filtresi (~33 gun): ustunde sadece long, altinda sadece short
 
-    # --- v2: rejim + ortalamaya donus + volatilite hedeflemesi ---
-    enable_regime: bool = _bool("ENABLE_REGIME", "true")        # rejim bazli kol kapilama
-    enable_meanrev: bool = _bool("ENABLE_MEANREV", "true")      # yatay rejimde ortalamaya donus kolu
-    enable_vol_target: bool = _bool("ENABLE_VOL_TARGET", "true")  # volatiliteye gore boyut olcekleme
+    # --- v2 deneyi: holdout (2025+) sinavinda v1'i GECEMEDI, varsayilan KAPALI ---
+    # Egitim: v1 PF 1.54 / v2 PF 1.27 - Holdout: v1 +49.3% / v2 +10.1%.
+    # Kod, bilesenleri tek tek izole test edebilmek icin duruyor.
+    enable_regime: bool = _bool("ENABLE_REGIME", "false")        # rejim bazli kol kapilama
+    enable_meanrev: bool = _bool("ENABLE_MEANREV", "false")      # yatay rejimde ortalamaya donus kolu
+    enable_vol_target: bool = _bool("ENABLE_VOL_TARGET", "false")  # volatiliteye gore boyut olcekleme
     regime_slope_bars: int = 30    # EMA200 egimi bakis penceresi (bar)
     meanrev_risk_mult: float = 0.5  # MR kolu islem riski carpani (trend/breakout'un yarisi)
     rsi_period: int = 2
