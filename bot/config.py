@@ -97,5 +97,8 @@ class Config:
         "REMINDERS",
         "2026-08-04|Railway deneme kredisi bitmek uzere! Hobby plana ($5/ay) gecmezsen bot DURUR.;"
         "2026-10-04|Binance API anahtari 90 gunluk omrunu dolduruyor (IP kisitsiz anahtarlar otomatik kapanir). "
-        "Yeni anahtar olustur, Railway Variables'a gir - yoksa bot emir atamaz!",
+        "Yeni anahtar olustur, Railway Variables'a gir - yoksa bot emir atamaz!;"
+        "2026-11-05|DENEME DONEMI BITTI (Tem-Kas): Claude ile aylik raporlari degerlendir. "
+        "Islem sikligi/PF/aylik getiriler backtest bandindaysa plan geregi sermayeyi min 10k'ya cikar "
+        "(CAPITAL_BASE=10000 yap, RISK_PER_TRADE=0.01 kalsin, 70/30 spot cekirdegi konus).",
     ))
