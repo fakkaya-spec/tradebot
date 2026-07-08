@@ -11,6 +11,7 @@
 Kullanim: python -m backtest.montecarlo --days 1825 --sims 10000
 """
 import argparse
+import dataclasses
 
 import numpy as np
 import pandas as pd
@@ -24,15 +25,18 @@ from .run import warmup_days
 BLOCK = 3  # blok bootstrap: 3'er aylik seriler korunur
 
 
-def monthly_returns(days: int, equity: float):
-    cfg = Config()
+def load_all(cfg, days: int):
     symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
     data, funding = {}, {}
     for sym in symbols:
         print(f"{sym}: veri yukleniyor...")
         k, f = data_mod.load(sym, cfg.timeframe, days + warmup_days(cfg.timeframe))
         data[sym], funding[sym] = k, f
-    print("Backtest kosuyor...")
+    return data, funding
+
+
+def monthly_returns(cfg, data, funding, equity: float, label: str):
+    print(f"Backtest kosuyor ({label})...")
     result = Backtester(data, funding, cfg, start_equity=equity).run()
     eq = result.equity_curve
     m = eq.resample("ME").last()
@@ -157,6 +161,58 @@ def mc_report(rets: pd.Series, base: float, sims: int, rng):
     print("  olabilir. Secim bias'i nedeniyle medyanlari ihtiyatla ~2/3 ile carpin.")
 
 
+def mc_stats(rets: pd.Series, base: float, sims: int, seed: int):
+    rng = np.random.default_rng(seed)
+    years = block_bootstrap_years(rets.to_numpy(), sims, 12, rng)
+    growth = np.cumprod(1 + years, axis=1)
+    annual = growth[:, -1] - 1
+    paths = np.concatenate([np.ones((sims, 1)), growth], axis=1)
+    dd = (paths / np.maximum.accumulate(paths, axis=1) - 1).min(axis=1)
+    equity = np.full(sims, base)
+    deposits = np.zeros(sims)
+    for m in range(years.shape[1]):
+        equity = equity * (1 + years[:, m])
+        short = np.maximum(0.0, base - equity)
+        deposits += short
+        equity += short
+    floor_net = equity - base - deposits
+    return {
+        "medyan": np.percentile(annual, 50), "kotu5": np.percentile(annual, 5),
+        "iyi95": np.percentile(annual, 95), "eksi_yil": (annual < 0).mean(),
+        "dd_medyan": np.percentile(dd, 50), "dd30": (dd < -0.30).mean(),
+        "floor_net_medyan": np.percentile(floor_net, 50),
+        "floor_net_kotu5": np.percentile(floor_net, 5),
+        "tamamlama_olasiligi": (deposits > 0).mean(),
+    }
+
+
+def ks_comparison(rets_ks, rets_no, base, sims, seed):
+    line = "=" * 66
+    a = mc_stats(rets_ks, base, sims, seed)
+    b = mc_stats(rets_no, base, sims, seed)
+    print(line)
+    print("  KIYAS: KILL-SWITCH ACIK (dur-bekle)  vs  KAPALI (tamamla-devam)")
+    print(line)
+    print(f"  {'':34}{'KS ACIK':>12}{'KS KAPALI':>12}")
+    print(f"  {'[Gercek 5 yil]':34}")
+    fa_path, fa_dep, fa_n = floor_refill_path(rets_ks.to_numpy(), base)
+    fb_path, fb_dep, fb_n = floor_refill_path(rets_no.to_numpy(), base)
+    print(f"  {'Son bakiye (taban modu)':34}{fa_path[-1]:>12,.0f}{fb_path[-1]:>12,.0f}")
+    print(f"  {'Cepten tamamlanan':34}{fa_dep:>12,.0f}{fb_dep:>12,.0f}")
+    print(f"  {'Net sonuc':34}{fa_path[-1]-base-fa_dep:>+12,.0f}{fb_path[-1]-base-fb_dep:>+12,.0f}")
+    print(f"  {'En kotu ay':34}{rets_ks.min()*100:>11.1f}%{rets_no.min()*100:>11.1f}%")
+    print(f"  {'[Monte Carlo - 12 ay]':34}")
+    print(f"  {'Medyan yillik getiri':34}{a['medyan']*100:>+11.1f}%{b['medyan']*100:>+11.1f}%")
+    print(f"  {'Kotu %5 yil':34}{a['kotu5']*100:>+11.1f}%{b['kotu5']*100:>+11.1f}%")
+    print(f"  {'Iyi %95 yil':34}{a['iyi95']*100:>+11.1f}%{b['iyi95']*100:>+11.1f}%")
+    print(f"  {'Eksi yil olasiligi':34}{a['eksi_yil']*100:>11.0f}%{b['eksi_yil']*100:>11.0f}%")
+    print(f"  {'DD < -%30 olasiligi':34}{a['dd30']*100:>11.0f}%{b['dd30']*100:>11.0f}%")
+    print(f"  {'Taban modu net (medyan)':34}{a['floor_net_medyan']:>+12,.0f}{b['floor_net_medyan']:>+12,.0f}")
+    print(f"  {'Taban modu net (kotu %5)':34}{a['floor_net_kotu5']:>+12,.0f}{b['floor_net_kotu5']:>+12,.0f}")
+    print(f"  {'Tamamlama gerekme olasiligi':34}{a['tamamlama_olasiligi']*100:>11.0f}%{b['tamamlama_olasiligi']*100:>11.0f}%")
+    print(line)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=1825)
@@ -165,10 +221,16 @@ def main():
     ap.add_argument("--seed", type=int, default=42)
     args = ap.parse_args()
 
-    rets = monthly_returns(args.days, args.equity)
+    cfg = Config()
+    data, funding = load_all(cfg, args.days)
+    rets = monthly_returns(cfg, data, funding, args.equity, "kill-switch ACIK")
     fixed_capital_report(rets, args.equity)
     floor_refill_report(rets, args.equity)
     mc_report(rets, args.equity, args.sims, np.random.default_rng(args.seed))
+
+    cfg_no_ks = dataclasses.replace(cfg, monthly_kill_switch=9.9)  # fiilen kapali
+    rets_no = monthly_returns(cfg_no_ks, data, funding, args.equity, "kill-switch KAPALI")
+    ks_comparison(rets, rets_no, args.equity, args.sims, args.seed)
 
 
 if __name__ == "__main__":
