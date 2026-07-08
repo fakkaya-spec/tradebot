@@ -227,6 +227,12 @@ def main():
                     log.exception("%s islenirken hata", symbol)
                     notifier.send(f"HATA {symbol}: {exc}")
             state.save()
+            if cfg.heartbeat:
+                pos_txt = ", ".join(
+                    f"{k.replace('|', ' ')} {v['side']}" for k, v in state.positions.items()
+                ) or "yok"
+                notifier.send(f"Nabiz {now.strftime('%H:%M')} UTC | {len(cfg.symbols)} parite tarandi | "
+                              f"acik pozisyon: {pos_txt} | ozsermaye: {get_equity(ex, cfg, state):.2f} USDT")
         except Exception as exc:
             log.exception("Dongu hatasi")
             notifier.send(f"DONGU HATASI: {exc}")

@@ -64,5 +64,6 @@ class Config:
 
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
+    heartbeat: bool = _bool("HEARTBEAT", "true")  # her donguden sonra kisa nabiz mesaji
 
     state_dir: str = os.getenv("STATE_DIR", "state")
