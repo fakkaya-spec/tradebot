@@ -70,14 +70,19 @@ class Backtester:
         self.cfg = cfg
         self.params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr, cfg.trail_atr)
         self.risk = RiskParams(cfg.risk_per_trade, cfg.max_leverage,
-                               cfg.max_position_notional_pct, cfg.monthly_kill_switch)
+                               cfg.max_position_notional_pct, cfg.monthly_kill_switch,
+                               max_same_direction=cfg.max_same_direction)
         self.funding = funding
         self.funding_estimated = any(f is None or len(f) == 0 for f in funding.values())
         self.data = {
             sym: add_indicators(df, cfg.ema_fast, cfg.ema_slow, cfg.adx_period,
-                                cfg.atr_period, cfg.donchian_entry, cfg.donchian_exit)
+                                cfg.atr_period, cfg.donchian_entry, cfg.donchian_exit,
+                                cfg.ema_macro)
             for sym, df in data.items()
         }
+        # stop sonrasi ayni yone yeniden giris yasagi: (symbol, sleeve) -> (side, yasak bitis ts)
+        self.cooldowns = {}
+        self.cooldown_delta = pd.Timedelta(hours=4 * cfg.cooldown_bars)
         self.start_equity = start_equity
         self.cash = start_equity
         self.positions = {}  # (symbol, sleeve) -> Position
@@ -114,8 +119,16 @@ class Backtester:
         self.trades.append(Trade(pos.symbol, pos.sleeve, pos.side, pos.entry_time, ts,
                                  pos.entry, fill, pos.qty, pnl, reason))
         del self.positions[key]
+        if reason == "stop":
+            self.cooldowns[key] = (pos.side, ts + self.cooldown_delta)
 
     def _try_open(self, symbol, sleeve, side, row, ts, equity, marks):
+        cd = self.cooldowns.get((symbol, sleeve))
+        if cd and cd[0] == side and ts < cd[1]:
+            return
+        same_dir = sum(1 for p in self.positions.values() if p.side == side)
+        if same_dir >= self.risk.max_same_direction:
+            return
         rate = self._funding_rate(symbol, ts)
         if funding_blocks_entry(side, rate, self.cfg.funding_limit):
             return
@@ -137,7 +150,7 @@ class Backtester:
     # --- ana dongu ------------------------------------------------------
     def run(self) -> Result:
         timeline = sorted(set().union(*[df.index for df in self.data.values()]))
-        warmup = max(self.cfg.donchian_entry + 1, self.cfg.ema_slow * 2)
+        warmup = max(self.cfg.donchian_entry + 1, self.cfg.ema_macro)
         equity_curve = {}
         marks = {}
 

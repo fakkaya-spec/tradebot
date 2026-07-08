@@ -16,6 +16,7 @@ def add_indicators(
     atr_period: int = 14,
     donchian_entry: int = 120,
     donchian_exit: int = 60,
+    ema_macro: int = 200,
 ) -> pd.DataFrame:
     """OHLCV DataFrame'ine ema_fast, ema_slow, atr, adx ve Donchian kanallarini ekler.
 
@@ -27,6 +28,7 @@ def add_indicators(
 
     df["ema_fast"] = c.ewm(span=ema_fast, adjust=False).mean()
     df["ema_slow"] = c.ewm(span=ema_slow, adjust=False).mean()
+    df["ema_macro"] = c.ewm(span=ema_macro, adjust=False).mean()
 
     prev_close = c.shift(1)
     tr = pd.concat([h - l, (h - prev_close).abs(), (l - prev_close).abs()], axis=1).max(axis=1)

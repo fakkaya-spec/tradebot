@@ -49,7 +49,7 @@ def print_report(m: dict, result, symbols, days):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=365)
-    ap.add_argument("--symbols", default="BTCUSDT,ETHUSDT,SOLUSDT,LTCUSDT")
+    ap.add_argument("--symbols", default="BTCUSDT,ETHUSDT,SOLUSDT")
     ap.add_argument("--equity", type=float, default=10_000)
     ap.add_argument("--no-cache", action="store_true")
     args = ap.parse_args()
@@ -60,8 +60,8 @@ def main():
     data, funding = {}, {}
     for sym in symbols:
         print(f"{sym}: veri yukleniyor...")
-        # warmup icin istenen aralige 30 gun eklenir
-        k, f = data_mod.load(sym, cfg.timeframe, args.days + 30, use_cache=not args.no_cache)
+        # warmup icin istenen aralige 45 gun eklenir (EMA200 ~33 gun + pay)
+        k, f = data_mod.load(sym, cfg.timeframe, args.days + 45, use_cache=not args.no_cache)
         data[sym], funding[sym] = k, f
         print(f"  {len(k)} mum, {len(f)} funding kaydi")
 

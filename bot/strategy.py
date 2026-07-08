@@ -26,19 +26,24 @@ class StrategyParams:
 
 
 def entry_signal(sleeve: str, row, params: StrategyParams):
-    """Kapanan bar icin giris sinyali: LONG, SHORT veya None."""
+    """Kapanan bar icin giris sinyali: LONG, SHORT veya None.
+
+    Makro filtre her iki kol icin gecerlidir: fiyat EMA200 ustundeyken sadece
+    long, altindayken sadece short alinir - buyuk resme karsi islem yapilmaz.
+    """
+    macro_long = row.close > row.ema_macro
     if sleeve == TREND:
         if row.adx > params.adx_threshold:
-            if row.ema_fast > row.ema_slow and row.close > row.ema_fast:
+            if macro_long and row.ema_fast > row.ema_slow and row.close > row.ema_fast:
                 return LONG
-            if row.ema_fast < row.ema_slow and row.close < row.ema_fast:
+            if not macro_long and row.ema_fast < row.ema_slow and row.close < row.ema_fast:
                 return SHORT
         return None
     if sleeve == BREAKOUT:
         if row.don_hi == row.don_hi:  # NaN kontrolu
-            if row.close > row.don_hi:
+            if macro_long and row.close > row.don_hi:
                 return LONG
-            if row.close < row.don_lo:
+            if not macro_long and row.close < row.don_lo:
                 return SHORT
         return None
     raise ValueError(f"bilinmeyen kol: {sleeve}")

@@ -3,7 +3,8 @@
 Binance USDT-M Futures üzerinde 4 saatlik mumlarla çalışan, orta risk profilli
 otomatik işlem botu. Railway üzerinde 7/24 worker olarak koşar.
 
-**Pariteler:** BTCUSDT, ETHUSDT, SOLUSDT, LTCUSDT
+**Pariteler:** BTCUSDT, ETHUSDT, SOLUSDT
+(LTC 5 yıllık backtest'te tüm pencerelerde zarar üretti ve evrenden çıkarıldı)
 **Hedef:** yıllık ~%50 (garanti değildir; trend yıllarında aşılabilir, yatay
 yıllarda drawdown normaldir)
 
@@ -19,12 +20,19 @@ kullanır:
 | Yönetim | 1.5×ATR kârda başabaş, sonra 3×ATR iz süren stop | 10 günlük karşı kanal kapanışında çıkış |
 | Çıkış | EMA kesişimi tersine dönerse | Donchian exit kanalı |
 
-Ek filtre: pozisyon yönündeki funding oranı > %0.1/8s ise yeni giriş yapılmaz.
+Ek filtreler:
+- **Makro yön filtresi:** fiyat EMA200(4h) üstündeyken sadece long, altındayken
+  sadece short alınır — büyük resme karşı işlem yapılmaz
+- **Cooldown:** stop yiyen pozisyon 24 saat (6 bar) boyunca aynı yöne yeniden
+  giremez — testere piyasada öğütülmeyi engeller
+- Pozisyon yönündeki funding oranı > %0.1/8s ise yeni giriş yapılmaz
 
 ### Risk çekirdeği (strateji ne derse desin aşılamaz)
 
 - İşlem başına risk: özsermayenin **%1**'i (stop mesafesine göre boyutlama)
 - Toplam kaldıraç tavanı: **3x** — tek pozisyon nominali en fazla 1× özsermaye
+- **Aynı yön tavanı:** aynı anda aynı yönde en fazla 3 pozisyon — pariteler
+  korele olduğu için hepsinin birlikte stop yemesini sınırlar
 - **Aylık kill-switch:** ay içi zarar %8'e ulaşırsa tüm pozisyonlar kapatılır,
   ay sonuna kadar işlem yapılmaz
 - Stop emirleri borsa tarafında `STOP_MARKET` olarak durur — bot çökse bile

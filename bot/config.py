@@ -18,8 +18,9 @@ class Config:
     testnet: bool = _bool("TESTNET", "true")
     dry_run: bool = _bool("DRY_RUN", "true")
 
+    # LTC 5 yillik backtest'te tum pencerelerde zarar uretti, evrenden cikarildi
     symbols: tuple = tuple(
-        s.strip() for s in os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,SOL/USDT,LTC/USDT").split(",") if s.strip()
+        s.strip() for s in os.getenv("SYMBOLS", "BTC/USDT,ETH/USDT,SOL/USDT").split(",") if s.strip()
     )
     timeframe: str = "4h"
 
@@ -29,6 +30,8 @@ class Config:
     max_position_notional_pct: float = 1.0  # tek pozisyon nominali en fazla 1x ozsermaye
     monthly_kill_switch: float = float(os.getenv("MONTHLY_KILL_SWITCH", "0.08"))
     funding_limit: float = float(os.getenv("FUNDING_LIMIT", "0.001"))  # 8 saatlik oran
+    max_same_direction: int = int(os.getenv("MAX_SAME_DIRECTION", "3"))  # ayni yonde acik pozisyon tavani
+    cooldown_bars: int = int(os.getenv("COOLDOWN_BARS", "6"))  # stop sonrasi ayni yone giris yasagi (bar)
 
     # Strateji parametreleri (backtest ile birebir ayni)
     ema_fast: int = 20
@@ -41,6 +44,7 @@ class Config:
     trail_atr: float = 3.0
     donchian_entry: int = 120  # 4h barda 20 gun
     donchian_exit: int = 60    # 4h barda 10 gun
+    ema_macro: int = 200       # makro yon filtresi (~33 gun): ustunde sadece long, altinda sadece short
 
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")

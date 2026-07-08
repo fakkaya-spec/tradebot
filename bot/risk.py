@@ -13,6 +13,7 @@ class RiskParams:
     max_position_notional_pct: float = 1.0  # tek pozisyon nominal tavani (x ozsermaye)
     monthly_kill_switch: float = 0.08     # aylik zarar limiti
     min_size_fraction: float = 0.25       # kaldirac tavani boyutu bunun altina dusurursa isleme girme
+    max_same_direction: int = 3           # ayni yonde ayni anda acik pozisyon tavani (korelasyon freni)
 
 
 def position_size(

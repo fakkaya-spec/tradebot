@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .config import Config
 from .exchange import assert_key_safety, current_funding_rate, fetch_ohlcv_df, make_exchange
@@ -39,6 +39,7 @@ class State:
     def __init__(self, path: str):
         self.path = path
         self.positions = {}  # "SYMBOL|sleeve" -> dict
+        self.cooldowns = {}  # "SYMBOL|sleeve" -> {"side": ..., "until": iso}
         self.paper_equity = PAPER_START_EQUITY
         self.load()
 
@@ -47,13 +48,15 @@ class State:
             with open(self.path) as f:
                 data = json.load(f)
             self.positions = data.get("positions", {})
+            self.cooldowns = data.get("cooldowns", {})
             self.paper_equity = data.get("paper_equity", PAPER_START_EQUITY)
 
     def save(self):
         os.makedirs(os.path.dirname(self.path), exist_ok=True)
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"positions": self.positions, "paper_equity": self.paper_equity}, f, indent=2)
+            json.dump({"positions": self.positions, "cooldowns": self.cooldowns,
+                       "paper_equity": self.paper_equity}, f, indent=2)
         os.replace(tmp, self.path)
 
 
@@ -110,14 +113,17 @@ def close_position(ex, cfg, notifier, state, key, pos, price, reason):
     if cfg.dry_run:
         state.paper_equity += pnl
     del state.positions[key]
+    if reason == "stop":
+        until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
+        state.cooldowns[key] = {"side": pos["side"], "until": until.isoformat()}
     notifier.send(f"KAPANDI {symbol} [{key.split('|')[1]}] {pos['side']} @ {price:.4f} | {reason} | PnL~{pnl:+.2f} USDT")
 
 
 def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, marks):
     df = add_indicators(
-        fetch_ohlcv_df(ex, symbol, cfg.timeframe),
+        fetch_ohlcv_df(ex, symbol, cfg.timeframe, limit=500),
         cfg.ema_fast, cfg.ema_slow, cfg.adx_period, cfg.atr_period,
-        cfg.donchian_entry, cfg.donchian_exit,
+        cfg.donchian_entry, cfg.donchian_exit, cfg.ema_macro,
     )
     row = df.iloc[-1]
     marks[symbol] = float(row.close)
@@ -152,6 +158,12 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
         side = entry_signal(sleeve, row, params)
         if not side or funding_blocks_entry(side, funding, cfg.funding_limit):
             continue
+        cd = state.cooldowns.get(key)
+        if cd and cd["side"] == side and datetime.now(timezone.utc) < datetime.fromisoformat(cd["until"]):
+            continue
+        same_dir = sum(1 for p in state.positions.values() if p["side"] == side)
+        if same_dir >= risk.max_same_direction:
+            continue
         equity = get_equity(ex, cfg, state)
         stop_dist = cfg.stop_atr * float(row.atr)
         qty = position_size(equity, float(row.close), stop_dist, open_notional(state, marks), risk)
@@ -177,7 +189,8 @@ def main():
     state = State(os.path.join(cfg.state_dir, "positions.json"))
     params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr, cfg.trail_atr)
     risk = RiskParams(cfg.risk_per_trade, cfg.max_leverage,
-                      cfg.max_position_notional_pct, cfg.monthly_kill_switch)
+                      cfg.max_position_notional_pct, cfg.monthly_kill_switch,
+                      max_same_direction=cfg.max_same_direction)
     kill_switch = MonthlyKillSwitch(cfg.monthly_kill_switch)
 
     mode = "DRY_RUN" if cfg.dry_run else ("TESTNET" if cfg.testnet else "CANLI")
