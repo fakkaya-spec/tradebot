@@ -122,6 +122,78 @@ backtest/
   selftest.py    # sentetik veriyle motor doğrulaması
 ```
 
+---
+
+# betbot — Spor Bahis Öneri Botu (değer bahsi)
+
+Kripto botundan bağımsız ikinci modül. Futbol (13 lig, Süper Lig dahil),
+tenis (ATP/WTA) ve NBA maçlarını her sabah tarar; kendi modelinin olasılığı
+piyasa oranının ima ettiğinden belirgin yüksekse ("edge") günün en iyi
+**en fazla 5** seçimini Kelly stake önerisiyle Telegram'a gönderir.
+Edge yoksa "bugün oynama" der.
+
+**Bot bahis OYNAMAZ, sadece öneri üretir.** Para ve hesap her zaman sizde
+kalır; bu hem güvenlik hem de bahis sitesi kuralları açısından bilinçli bir
+tasarım kararıdır.
+
+## Modeller
+
+| Spor | Model | Piyasa |
+|---|---|---|
+| Futbol | Online atak/defans Poisson (Dixon-Coles düzeltmeli) | 1X2, Ü/A 2.5 |
+| Tenis | Yüzey harmanlı Elo (538 tarzı, K maç sayısıyla azalır) | Maç kazananı |
+| NBA | Elo + ev avantajı + galibiyet farkı çarpanı | Moneyline |
+
+Model olasılığı, kitapçılar-arası konsensüsle harmanlanır (`MARKET_BLEND`,
+varsayılan 0.5) — yalnızca modelin piyasaya GÜÇLÜ itirazlarında bahis çıkar.
+
+## Risk profilleri
+
+| | orta (varsayılan) | agresif |
+|---|---|---|
+| Kelly çarpanı | 0.25 | 0.70 |
+| Tek bahis tavanı | %2 | %7 |
+| Min. edge | %5 | %4 |
+| Günlük toplam risk | %10 | %30 |
+| Aylık kill-switch | -%15 | -%30 |
+
+Gerçekçi beklenti (orta profil): iyi yılda çift haneli büyüme, kötü ayda
+kill-switch. Yıllık %500 hedefi ancak "agresif" profille ve **yüksek iflas
+olasılığıyla** denenebilir — backtest raporundaki drawdown satırını okumadan
+karar vermeyin.
+
+## Backtest
+
+```bash
+python -m betbacktest.selftest                    # motor doğrulaması (ağ gerektirmez)
+python -m betbacktest.run --start 2023-07-01      # son 3 sezon, iki profil yan yana
+python -m betbacktest.run --start 2023-07-01 --best-price   # en iyi piyasa oranıyla (iyimser)
+```
+
+Veri kaynakları (ücretsiz, gerçek tarihsel oranlar): football-data.co.uk,
+tennis-data.co.uk, sportsbookreviewsonline.com. İndirilenler
+`betbacktest/cache/` altında saklanır. Backtest **walk-forward** çalışır:
+model her maç için yalnızca o tarihten önceki maçları bilir; bahisler
+Bet365 oranıyla (temkinli) fiyatlanır, konsensüs marj çıkarılarak hesaplanır.
+
+> Claude Code cloud ortamında ağ politikasına şu alan adları eklenmelidir:
+> `www.football-data.co.uk`, `www.tennis-data.co.uk`,
+> `www.sportsbookreviewsonline.com` (backtest) ve `api.the-odds-api.com`,
+> `api.telegram.org` (canlı mod).
+
+**Dürüstlük notu:** backtest sonuçları kapanış oranlarıyla hesaplanır;
+gerçekte o oranı her zaman bulamazsınız ve kazanan hesaplara siteler limit
+koyar. Gerçek performansı backtest'in ~%20-30 altında bekleyin.
+
+## Canlı çalıştırma (Railway)
+
+1. [the-odds-api.com](https://the-odds-api.com) üzerinden ücretsiz API anahtarı alın.
+2. Railway'de aynı repodan **ikinci bir servis** oluşturun; start komutu:
+   `python -m betbot.main --loop`
+3. Variables: `ODDS_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`,
+   `LIVE_PROFILE=orta`, `BANKROLL`, `DRY_RUN=true` (ilk hafta böyle izleyin).
+4. Öneriler tatmin ediyorsa `DRY_RUN=false` yapın; kuponlar Telegram'a düşer.
+
 ## Sorumluluk reddi
 
 Bu yazılım eğitim amaçlıdır. Kaldıraçlı kripto türevleri yüksek risk içerir;

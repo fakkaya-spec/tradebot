@@ -7,3 +7,4 @@ backtest/cache/
 backtest/results/
 state/
 *.log
+betbacktest/cache/
