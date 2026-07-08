@@ -41,6 +41,48 @@ def assert_key_safety(ex, testnet: bool) -> None:
         )
 
 
+def prepare_symbol(ex, symbol: str, leverage: int) -> None:
+    """Sembol icin kaldirac ve marjin modunu ayarlar (bir kez, acilista).
+    Binance varsayilani 20x olabilir - biz dusuk kaldiracla genis likidasyon
+    tamponu istiyoruz."""
+    try:
+        ex.set_margin_mode("cross", symbol)
+    except Exception:
+        pass  # zaten cross ise borsa hata dondurur, sorun degil
+    try:
+        ex.set_leverage(leverage, symbol)
+    except Exception as exc:
+        log.warning("%s kaldirac ayarlanamadi: %s", symbol, exc)
+
+
+def adjust_quantity(ex, symbol: str, qty: float, price: float,
+                    stop_distance: float, intended_risk: float) -> float:
+    """Miktari borsa hassasiyetine ve minimum emir kurallarina uydurur.
+
+    Kucuk sermayede istenen miktar borsa minimumunun altinda kalabilir.
+    Minimuma YUKARI yuvarlamaya ancak gercek risk hedeflenen riskin 2 katini
+    asmiyorsa izin verilir; asiyorsa islem atlanir (0 doner).
+    """
+    market = ex.market(symbol)
+    limits = market.get("limits", {})
+    min_qty = (limits.get("amount") or {}).get("min") or 0.0
+    min_notional = (limits.get("cost") or {}).get("min") or 5.0
+
+    candidate = max(qty, min_qty, min_notional / price)
+    candidate = float(ex.amount_to_precision(symbol, candidate))
+    if candidate < min_qty or candidate * price < min_notional:
+        # hassasiyet asagi yuvarladi, bir adim yukari dene
+        step = (market.get("precision") or {}).get("amount")
+        step = step if isinstance(step, float) and step > 0 else 10 ** -(step or 3)
+        candidate = float(ex.amount_to_precision(symbol, candidate + step))
+    actual_risk = candidate * stop_distance
+    if candidate <= 0 or actual_risk > 2 * intended_risk:
+        log.info("%s: miktar borsa minimumuna sigmadi (risk %.2f > 2x hedef %.2f), atlandi",
+                 symbol, actual_risk, intended_risk)
+        return 0.0
+    return candidate
+
+
 def fetch_ohlcv_df(ex, symbol: str, timeframe: str, limit: int = 300):
     import pandas as pd
 

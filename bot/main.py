@@ -17,7 +17,8 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from .config import Config
-from .exchange import assert_key_safety, current_funding_rate, fetch_ohlcv_df, make_exchange
+from .exchange import (adjust_quantity, assert_key_safety, current_funding_rate,
+                       fetch_ohlcv_df, make_exchange, prepare_symbol)
 from .indicators import add_indicators
 from .notifier import Notifier
 from .risk import MonthlyKillSwitch, RiskParams, position_size
@@ -169,6 +170,10 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
                             open_notional(state, marks), risk, risk_scale)
         if qty <= 0:
             continue
+        qty = adjust_quantity(ex, symbol, qty, float(row.close), stop_dist,
+                              equity * cfg.risk_per_trade * risk_scale)
+        if qty <= 0:
+            continue
         place_market(ex, cfg, symbol, "buy" if side == LONG else "sell", qty)
         stop = initial_stop(side, float(row.close), float(row.atr), params)
         state.positions[key] = {
@@ -184,8 +189,11 @@ def main():
     cfg = Config()
     notifier = Notifier(cfg.telegram_token, cfg.telegram_chat_id)
     ex = make_exchange(cfg)
+    ex.load_markets()
     if not cfg.dry_run:
         assert_key_safety(ex, cfg.testnet)
+        for symbol in cfg.symbols:
+            prepare_symbol(ex, symbol, int(cfg.max_leverage))
     state = State(os.path.join(cfg.state_dir, "positions.json"))
     params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr,
                             cfg.trail_atr, enable_regime=cfg.enable_regime,
