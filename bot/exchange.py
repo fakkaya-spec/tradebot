@@ -83,6 +83,17 @@ def adjust_quantity(ex, symbol: str, qty: float, price: float,
     return candidate
 
 
+def fetch_net_positions(ex, symbols):
+    """Borsadaki net pozisyon miktarlari: {symbol: +qty (long) / -qty (short) / 0}."""
+    result = {s: 0.0 for s in symbols}
+    for p in ex.fetch_positions(symbols):
+        sym = p.get("symbol")
+        qty = float(p.get("contracts") or 0.0)
+        if sym in result and qty:
+            result[sym] += qty if p.get("side") == "long" else -qty
+    return result
+
+
 def fetch_ohlcv_df(ex, symbol: str, timeframe: str, limit: int = 300):
     import pandas as pd
 

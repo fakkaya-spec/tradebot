@@ -18,7 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 from .config import Config
 from .exchange import (adjust_quantity, assert_key_safety, current_funding_rate,
-                       fetch_ohlcv_df, make_exchange, prepare_symbol)
+                       fetch_net_positions, fetch_ohlcv_df, make_exchange,
+                       prepare_symbol)
 from .indicators import add_indicators
 from .notifier import Notifier
 from .risk import MonthlyKillSwitch, RiskParams, position_size
@@ -42,6 +43,7 @@ class State:
         self.positions = {}  # "SYMBOL|sleeve" -> dict
         self.cooldowns = {}  # "SYMBOL|sleeve" -> {"side": ..., "until": iso}
         self.core = {}       # "SYMBOL" -> "coin" | "cash" (spot cekirdek durumu)
+        self.ks = {}         # kill-switch ay durumu (restart'a dayanikli)
         self.paper_equity = PAPER_START_EQUITY
         self.load()
 
@@ -52,6 +54,7 @@ class State:
             self.positions = data.get("positions", {})
             self.cooldowns = data.get("cooldowns", {})
             self.core = data.get("core", {})
+            self.ks = data.get("ks", {})
             self.paper_equity = data.get("paper_equity", PAPER_START_EQUITY)
 
     def save(self):
@@ -59,8 +62,46 @@ class State:
         tmp = self.path + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"positions": self.positions, "cooldowns": self.cooldowns,
-                       "core": self.core, "paper_equity": self.paper_equity}, f, indent=2)
+                       "core": self.core, "ks": self.ks,
+                       "paper_equity": self.paper_equity}, f, indent=2)
         os.replace(tmp, self.path)
+
+
+def reconcile_state(ex, cfg, notifier, state):
+    """Acilista bot defterini borsayla mutabakata cevirir.
+
+    Bot cevrimdisiyken stop tetiklenmis olabilir: kayitta acik gorunen ama
+    borsada kapanmis pozisyonlar defterden dusulur, artik kalan stop
+    emirleri iptal edilir ve cooldown uygulanir."""
+    if cfg.dry_run or not state.positions:
+        return
+    try:
+        symbols = sorted({k.split("|")[0] for k in state.positions})
+        net = fetch_net_positions(ex, symbols)
+        for sym in symbols:
+            keys = [k for k in state.positions if k.split("|")[0] == sym]
+            state_net = sum(state.positions[k]["qty"] * (1 if state.positions[k]["side"] == LONG else -1)
+                            for k in keys)
+            exchange_net = net.get(sym, 0.0)
+            if abs(exchange_net) < 1e-12:
+                for k in keys:
+                    pos = state.positions.pop(k)
+                    until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
+                    state.cooldowns[k] = {"side": pos["side"], "until": until.isoformat()}
+                try:
+                    for order in ex.fetch_open_orders(sym):
+                        ex.cancel_order(order["id"], sym)
+                except Exception as exc:
+                    log.warning("%s artik emirler temizlenemedi: %s", sym, exc)
+                notifier.send(f"MUTABAKAT {sym}: pozisyon bot cevrimdisiyken borsada kapanmis "
+                              "(muhtemelen stop). Kayit temizlendi, cooldown uygulandi.")
+            elif abs(exchange_net - state_net) > 1e-9:
+                notifier.send(f"UYARI {sym}: borsa pozisyonu ({exchange_net:+.6f}) bot kaydiyla "
+                              f"({state_net:+.6f}) uyusmuyor - manuel kontrol gerekli.")
+        state.save()
+    except Exception as exc:
+        log.warning("mutabakat basarisiz: %s", exc)
+        notifier.send(f"UYARI: acilis mutabakati yapilamadi: {exc}")
 
 
 def check_core_alerts(ex, cfg, notifier, state):
@@ -228,9 +269,16 @@ def main():
                       cfg.max_position_notional_pct, cfg.monthly_kill_switch,
                       max_same_direction=cfg.max_same_direction)
     kill_switch = MonthlyKillSwitch(cfg.monthly_kill_switch)
+    # kill-switch ay durumu restart'a dayanikli olsun
+    now0 = datetime.now(timezone.utc)
+    if state.ks and state.ks.get("month") == [now0.year, now0.month]:
+        kill_switch.month = (now0.year, now0.month)
+        kill_switch.month_start_equity = state.ks["start_equity"]
+        kill_switch.tripped = state.ks["tripped"]
 
     mode = "DRY_RUN" if cfg.dry_run else ("TESTNET" if cfg.testnet else "CANLI")
     notifier.send(f"Bot basladi [{mode}] semboller: {', '.join(cfg.symbols)}")
+    reconcile_state(ex, cfg, notifier, state)
 
     while True:
         try:
@@ -254,6 +302,10 @@ def main():
                     notifier.send(f"HATA {symbol}: {exc}")
             if cfg.core_alerts:
                 check_core_alerts(ex, cfg, notifier, state)
+            if kill_switch.month:
+                state.ks = {"month": list(kill_switch.month),
+                            "start_equity": kill_switch.month_start_equity,
+                            "tripped": kill_switch.tripped}
             state.save()
             # Nabiz gunde BIR kez atilir (heartbeat_hour'daki dongude) - islem,
             # cekirdek ve hata bildirimleri her zaman aninda gider.
