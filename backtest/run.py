@@ -98,11 +98,16 @@ def main():
     ap.add_argument("--compare", action="store_true", help="--holdout ile: v1 ve v2'yi yan yana karsilastir")
     ap.add_argument("--sweep", action="store_true",
                     help="--holdout ile: risk/kill-switch kombinasyonlarini tara")
+    ap.add_argument("--timeframe", default=None,
+                    help="mum periyodu, orn. 1h (varsayilan: 4h). Ayni bar-parametreleriyle "
+                         "daha kisa periyot = daha hizli/sik islem yapan varyant")
     args = ap.parse_args()
 
     cfg = Config()
     if args.legacy:
         cfg = legacy_cfg(cfg)
+    if args.timeframe:
+        cfg = dataclasses.replace(cfg, timeframe=args.timeframe)
     symbols = [s.strip() for s in args.symbols.split(",")]
 
     data, funding = {}, {}
@@ -130,7 +135,8 @@ def main():
             print()
             return
         if args.compare:
-            variants = [("v1", legacy_cfg(Config())), ("v2", Config())]
+            variants = [("v1", legacy_cfg(cfg)), ("v2", dataclasses.replace(cfg, enable_regime=True,
+                        enable_meanrev=True, enable_vol_target=True))]
             print("\n  KARSILASTIRMA  (v1: eski hibrit | v2: rejim + meanrev + vol hedefleme)")
             for wtitle, ws, we in windows:
                 print(f"\n  {wtitle}")

@@ -81,7 +81,8 @@ class Backtester:
         self.data = {sym: add_indicators(df, cfg) for sym, df in data.items()}
         # stop sonrasi ayni yone yeniden giris yasagi: (symbol, sleeve) -> (side, yasak bitis ts)
         self.cooldowns = {}
-        self.cooldown_delta = pd.Timedelta(hours=4 * cfg.cooldown_bars)
+        bar_hours = int(cfg.timeframe.rstrip("h"))  # "4h" -> 4, "1h" -> 1
+        self.cooldown_delta = pd.Timedelta(hours=bar_hours * cfg.cooldown_bars)
         self.start_equity = start_equity
         self.cash = start_equity
         self.positions = {}  # (symbol, sleeve) -> Position
