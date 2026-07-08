@@ -19,9 +19,18 @@ class Candidate:
     price: float         # oynanabilir ondalık oran
     prob: float          # harmanlanmış olasılık tahmini
     edge: float = field(init=False)
-    won: bool | None = None   # backtest'te sonuç
+    won: bool | None = None       # backtest'te sonuç
+    p_model: float | None = None  # harman öncesi model olasılığı
+    p_fair: float | None = None   # marjsız piyasa konsensüs olasılığı
 
     def __post_init__(self):
+        self.edge = self.prob * self.price - 1.0
+
+    def reblend(self, w: float) -> None:
+        """Harman ağırlığını değiştirip olasılık ve edge'i yeniden hesaplar."""
+        if self.p_model is None or self.p_fair is None:
+            return
+        self.prob = (1.0 - w) * self.p_model + w * self.p_fair
         self.edge = self.prob * self.price - 1.0
 
 

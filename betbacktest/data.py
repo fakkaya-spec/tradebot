@@ -95,6 +95,7 @@ def load_football(first_year: int, last_year: int,
                     "gh": int(gh), "ga": int(ga),
                     "odds": {
                         "b365": {k: _num(r.get(f"B365{k}")) for k in "HDA"},
+                        "ps": {k: _num(r.get(f"PS{k}")) for k in "HDA"},
                         "avg": {k: _num(r.get(f"Avg{k}")) or _num(r.get(f"BbAv{k}"))
                                 for k in "HDA"},
                         "max": {k: _num(r.get(f"Max{k}")) or _num(r.get(f"BbMx{k}"))
@@ -103,6 +104,7 @@ def load_football(first_year: int, last_year: int,
                                     "U": _num(r.get("B365<2.5"))},
                         "ou_avg": {"O": _num(r.get("Avg>2.5")) or _num(r.get("BbAv>2.5")),
                                    "U": _num(r.get("Avg<2.5")) or _num(r.get("BbAv<2.5"))},
+                        "ou_ps": {"O": _num(r.get("P>2.5")), "U": _num(r.get("P<2.5"))},
                     },
                 }
                 out.append(rec)

@@ -20,7 +20,8 @@ from betbot.picker import Candidate, blend, daily_picks, demargin
 
 # ------------------------------------------------------------ aday üretimi
 def football_candidates(m: dict, model: FootballPoisson,
-                        best_price: bool = False) -> list[Candidate]:
+                        best_price: bool = False,
+                        fair_src: str = "avg") -> list[Candidate]:
     if (model.matches(m["home"]) < config.MIN_TEAM_MATCHES
             or model.matches(m["away"]) < config.MIN_TEAM_MATCHES):
         return []
@@ -29,7 +30,9 @@ def football_candidates(m: dict, model: FootballPoisson,
     out = []
     # 1X2
     b365 = [o["b365"].get(k) for k in "HDA"]
-    cons = [o["avg"].get(k) for k in "HDA"]
+    cons = [o.get(fair_src, o["avg"]).get(k) for k in "HDA"]
+    if not all(cons):
+        cons = [o["avg"].get(k) for k in "HDA"]
     if all(b365) and all(cons):
         fair = demargin(cons)
         price_src = [o["max"].get(k) for k in "HDA"] if best_price else b365
@@ -40,9 +43,13 @@ def football_candidates(m: dict, model: FootballPoisson,
             c = Candidate(str(m["date"]), "football", m["league"],
                           f"{m['home']} - {m['away']}", "1X2", k, price, p)
             c.won = results[k]
+            c.p_model, c.p_fair = probs[k], fair[i]
             out.append(c)
     # Üst/Alt 2.5
-    ou_b, ou_a = o["ou_b365"], o["ou_avg"]
+    ou_b = o["ou_b365"]
+    ou_a = o.get("ou_ps" if fair_src == "ps" else "ou_avg") or o["ou_avg"]
+    if not (ou_a.get("O") and ou_a.get("U")):
+        ou_a = o["ou_avg"]
     if ou_b.get("O") and ou_b.get("U") and ou_a.get("O") and ou_a.get("U"):
         fair = demargin([ou_a["O"], ou_a["U"]])
         total = m["gh"] + m["ga"]
@@ -51,6 +58,7 @@ def football_candidates(m: dict, model: FootballPoisson,
             c = Candidate(str(m["date"]), "football", m["league"],
                           f"{m['home']} - {m['away']}", "O/U 2.5", k, ou_b[mk], p)
             c.won = (total >= 3) if mk == "O" else (total <= 2)
+            c.p_model, c.p_fair = probs[k], fair[i]
             out.append(c)
     return out
 
@@ -79,6 +87,7 @@ def tennis_candidates(m: dict, model: TennisElo,
         c = Candidate(str(m["date"]), "tennis", m["league"],
                       f"{m['winner']} - {m['loser']}", "ML", name, price, p)
         c.won = won
+        c.p_model, c.p_fair = p_model, fair[opp_idx]
         out.append(c)
     return out
 
@@ -101,6 +110,7 @@ def nba_candidates(m: dict, model: NbaElo) -> list[Candidate]:
         c = Candidate(str(m["date"]), "basketball", "NBA",
                       f"{m['away']} @ {m['home']}", "ML", team, price, blend(p_model, p_fair))
         c.won = won
+        c.p_model, c.p_fair = p_model, p_fair
         out.append(c)
     return out
 
@@ -134,7 +144,7 @@ class SimResult:
 
 
 def build_daily_candidates(matches: list[dict], start: date, end: date,
-                           best_price: bool = False,
+                           best_price: bool = False, fair_src: str = "avg",
                            progress: bool = False) -> dict[date, list[Candidate]]:
     """Tüm sporları tek kronolojik akışta işler; gün -> adaylar döndürür."""
     fb = FootballPoisson()
@@ -155,7 +165,7 @@ def build_daily_candidates(matches: list[dict], start: date, end: date,
             cands: list[Candidate] = []
             for m in todays:
                 if m["sport"] == "football":
-                    cands.extend(football_candidates(m, fb, best_price))
+                    cands.extend(football_candidates(m, fb, best_price, fair_src))
                 elif m["sport"] == "tennis":
                     cands.extend(tennis_candidates(m, tn, best_price))
                 else:

@@ -42,7 +42,8 @@ MAX_DAILY_PICKS = _i("MAX_DAILY_PICKS", 5)
 MIN_ODDS = _f("MIN_ODDS", 1.50)
 MAX_ODDS = _f("MAX_ODDS", 4.50)
 MIN_TEAM_MATCHES = _i("MIN_TEAM_MATCHES", 10)   # model bu kadar maç görmeden bahis önermez
-MARKET_BLEND = _f("MARKET_BLEND", 0.50)         # olasılık = (1-w)*model + w*piyasa konsensüsü
+MARKET_BLEND = _f("MARKET_BLEND", 0.95)         # olasılık = (1-w)*model + w*adil piyasa (Pinnacle)
+                                                # backtest taraması: w<0.9 her ayarda zarar etti
 
 # --- Canlı mod ---
 LIVE_PROFILE = os.getenv("LIVE_PROFILE", "orta")

@@ -49,8 +49,10 @@ def main() -> None:
     ap.add_argument("--start", default="2023-07-01")
     ap.add_argument("--end", default=str(date.today()))
     ap.add_argument("--sports", default="football,tennis,basketball")
-    ap.add_argument("--best-price", action="store_true",
-                    help="B365 yerine piyasadaki en iyi oranla oyna (iyimser)")
+    ap.add_argument("--fair", default="ps", choices=["ps", "avg"],
+                    help="adil fiyat referansı: Pinnacle (ps) veya piyasa ortalaması")
+    ap.add_argument("--b365", action="store_true",
+                    help="en iyi piyasa oranı yerine sadece B365 ile oyna (temkinli)")
     ap.add_argument("--max-picks", type=int, default=config.MAX_DAILY_PICKS)
     ap.add_argument("--bank", type=float, default=1000.0)
     args = ap.parse_args()
@@ -76,7 +78,8 @@ def main() -> None:
         raise SystemExit("veri yok — ağ politikasında veri alan adlarına izin verildi mi?")
 
     print(f"\nWalk-forward adaylar üretiliyor (bahisler {start} itibarıyla) ...")
-    daily = build_daily_candidates(matches, start, end, best_price=args.best_price)
+    daily = build_daily_candidates(matches, start, end,
+                                   best_price=not args.b365, fair_src=args.fair)
     n_cand = sum(len(v) for v in daily.values())
     print(f"  {len(daily)} gün, {n_cand} aday fiyatlandı")
 

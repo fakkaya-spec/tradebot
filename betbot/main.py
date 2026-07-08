@@ -72,16 +72,23 @@ def build_models() -> tuple[FootballPoisson, TennisElo, NbaElo]:
 
 def _consensus_and_best(books: list[dict], market: str,
                         outcomes: list[str]) -> tuple[list[float], list[float]] | None:
-    """Kitapçılar arası ortalama (konsensüs) ve en iyi oranlar."""
+    """Adil fiyat referansı ve en iyi oranlar.
+
+    Adil fiyat için öncelik Pinnacle'dır (keskin kitapçı; backtest'te kârlı
+    tek referans buydu); piyasada yoksa tüm kitapçıların ortalaması kullanılır.
+    """
+    pinn = next((b for b in books if "pinnacle" in b["name"].lower()
+                 and all(b[market].get(n) for n in outcomes)), None)
     prices: list[list[float]] = []
     for name in outcomes:
         ps = [b[market][name] for b in books if b[market].get(name)]
         if not ps:
             return None
         prices.append(ps)
-    avg = [sum(p) / len(p) for p in prices]
+    fair = ([pinn[market][n] for n in outcomes] if pinn
+            else [sum(p) / len(p) for p in prices])
     best = [max(p) for p in prices]
-    return avg, best
+    return fair, best
 
 
 def candidates_for(ev: dict, fb: FootballPoisson, tn: TennisElo,
