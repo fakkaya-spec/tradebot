@@ -19,9 +19,9 @@ import pandas as pd
 
 from bot.indicators import add_indicators
 from bot.risk import MonthlyKillSwitch, RiskParams, position_size
-from bot.strategy import (LONG, SHORT, SLEEVES, StrategyParams, entry_signal,
-                          exit_signal, funding_blocks_entry, initial_stop,
-                          update_trailing_stop)
+from bot.strategy import (LONG, MEANREV, SHORT, StrategyParams, active_sleeves,
+                          entry_signal, exit_signal, funding_blocks_entry,
+                          initial_stop, update_trailing_stop)
 
 TAKER_FEE = 0.0005
 SLIPPAGE = 0.0003
@@ -68,18 +68,17 @@ class Backtester:
     def __init__(self, data: dict, funding: dict, cfg, start_equity: float = 10_000.0):
         """data: {symbol: OHLCV DataFrame}, funding: {symbol: Series veya bos}."""
         self.cfg = cfg
-        self.params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr, cfg.trail_atr)
+        self.params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr,
+                                     cfg.trail_atr, enable_regime=cfg.enable_regime,
+                                     rsi_oversold=cfg.rsi_oversold,
+                                     rsi_overbought=cfg.rsi_overbought)
         self.risk = RiskParams(cfg.risk_per_trade, cfg.max_leverage,
                                cfg.max_position_notional_pct, cfg.monthly_kill_switch,
                                max_same_direction=cfg.max_same_direction)
+        self.sleeves = active_sleeves(cfg)
         self.funding = funding
         self.funding_estimated = any(f is None or len(f) == 0 for f in funding.values())
-        self.data = {
-            sym: add_indicators(df, cfg.ema_fast, cfg.ema_slow, cfg.adx_period,
-                                cfg.atr_period, cfg.donchian_entry, cfg.donchian_exit,
-                                cfg.ema_macro)
-            for sym, df in data.items()
-        }
+        self.data = {sym: add_indicators(df, cfg) for sym, df in data.items()}
         # stop sonrasi ayni yone yeniden giris yasagi: (symbol, sleeve) -> (side, yasak bitis ts)
         self.cooldowns = {}
         self.cooldown_delta = pd.Timedelta(hours=4 * cfg.cooldown_bars)
@@ -136,7 +135,11 @@ class Backtester:
         if not np.isfinite(atr) or atr <= 0:
             return
         stop_dist = self.params.stop_atr * atr
-        qty = position_size(equity, float(row.close), stop_dist, self._open_notional(marks), self.risk)
+        risk_scale = self.cfg.meanrev_risk_mult if sleeve == MEANREV else 1.0
+        if self.cfg.enable_vol_target:
+            risk_scale *= float(row.vol_scale)
+        qty = position_size(equity, float(row.close), stop_dist, self._open_notional(marks),
+                            self.risk, risk_scale)
         if qty <= 0:
             return
         direction = 1 if side == LONG else -1
@@ -150,7 +153,7 @@ class Backtester:
     # --- ana dongu ------------------------------------------------------
     def run(self) -> Result:
         timeline = sorted(set().union(*[df.index for df in self.data.values()]))
-        warmup = max(self.cfg.donchian_entry + 1, self.cfg.ema_macro)
+        warmup = max(self.cfg.donchian_entry + 1, self.cfg.ema_macro, self.cfg.vol_window)
         equity_curve = {}
         marks = {}
 
@@ -202,7 +205,7 @@ class Backtester:
             # 4) yeni girisler
             if not self.kill_switch.tripped:
                 for sym, row in rows.items():
-                    for sleeve in SLEEVES:
+                    for sleeve in self.sleeves:
                         if (sym, sleeve) in self.positions:
                             continue
                         side = entry_signal(sleeve, row, self.params)

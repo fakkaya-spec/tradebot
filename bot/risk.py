@@ -22,15 +22,17 @@ def position_size(
     stop_distance: float,
     open_notional: float,
     params: RiskParams,
+    risk_scale: float = 1.0,
 ) -> float:
     """Miktar (adet) dondurur; sinirlara sigmiyorsa 0.
 
-    Boyut = (ozsermaye x risk) / stop mesafesi -> stop yenirse kayip her zaman
-    ozsermayenin sabit yuzdesi olur.
+    Boyut = (ozsermaye x risk x risk_scale) / stop mesafesi -> stop yenirse
+    kayip her zaman ozsermayenin sabit yuzdesi olur. risk_scale, kol carpani
+    (meanrev 0.5) ve volatilite hedeflemesi carpanini tasir.
     """
     if equity <= 0 or stop_distance <= 0 or price <= 0:
         return 0.0
-    qty = (equity * params.risk_per_trade) / stop_distance
+    qty = (equity * params.risk_per_trade * risk_scale) / stop_distance
     full_qty = qty
 
     max_notional = equity * params.max_position_notional_pct

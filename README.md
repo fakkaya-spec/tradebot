@@ -13,12 +13,22 @@ yıllarda drawdown normaldir)
 Sermaye iki bağımsız "kol" arasında paylaşılır; ikisi de aynı risk çekirdeğini
 kullanır:
 
-| | TREND kolu | BREAKOUT kolu |
-|---|---|---|
-| Giriş | EMA20/EMA50 yönü + ADX(14) > 25 + kapanış EMA20'nin doğru tarafında | 20 günlük Donchian kanal kırılımı (turtle) |
-| Stop | 2×ATR(14) | 2×ATR(14) sabit |
-| Yönetim | 1.5×ATR kârda başabaş, sonra 3×ATR iz süren stop | 10 günlük karşı kanal kapanışında çıkış |
-| Çıkış | EMA kesişimi tersine dönerse | Donchian exit kanalı |
+| | TREND kolu | BREAKOUT kolu | MEANREV kolu (v2) |
+|---|---|---|---|
+| Giriş | EMA20/EMA50 yönü + ADX(14) > 25 + kapanış EMA20'nin doğru tarafında | 20 günlük Donchian kanal kırılımı (turtle) | Sadece yatay rejimde: Bollinger(20,2) dışı + RSI(2) aşırılığı |
+| Stop | 2×ATR(14) | 2×ATR(14) sabit | 2×ATR(14) sabit, yarım risk |
+| Yönetim | 1.5×ATR kârda başabaş, sonra 3×ATR iz süren stop | 10 günlük karşı kanal kapanışında çıkış | Orta banda dönüşte kâr al |
+| Çıkış | EMA kesişimi tersine dönerse | Donchian exit kanalı | Bollinger orta bandı |
+
+### v2: Rejim kapılaması ve volatilite hedeflemesi
+
+Her bar üç rejimden birine sınıflanır (ADX + EMA200 tarafı + EMA200 eğimi):
+**trend-yukarı / trend-aşağı / yatay**. Trend kolu sadece kendi yönündeki
+trend rejiminde, meanrev kolu sadece yatay rejimde açılır; breakout kolu
+karşı-trend rejiminde açılamaz (yatayda serbest — kırılım çoğu zaman ADX
+henüz "yatay" derken gerçekleşir). Volatilite hedeflemesi pozisyon riskini
+piyasa çalkantısıyla ters orantılı ölçekler (0.5×–1.5×).
+Tümü env ile kapatılabilir: `ENABLE_REGIME`, `ENABLE_MEANREV`, `ENABLE_VOL_TARGET`.
 
 Ek filtreler:
 - **Makro yön filtresi:** fiyat EMA200(4h) üstündeyken sadece long, altındayken
@@ -61,8 +71,10 @@ cp .env.example .env   # doldurun (sadece lokal; Railway'de Variables kullanın)
 
 ```bash
 python -m backtest.selftest              # motor doğrulaması (sentetik veri)
-python -m backtest.run --days 365        # son 1 yıl, 4 parite, gerçek Binance verisi
-python -m backtest.run --days 730 --symbols BTCUSDT,ETHUSDT
+python -m backtest.run --days 365        # son 1 yıl (v2)
+python -m backtest.run --days 365 --legacy   # v1 davranışı (v2 özellikleri kapalı)
+python -m backtest.run --days 1825 --holdout 2025-01-01 --compare
+    # v1 ve v2'yi eğitim (<2025) ve görülmemiş (≥2025) dönemde yan yana karşılaştırır
 ```
 
 Backtest, canlı botla **birebir aynı** strateji ve risk modüllerini kullanır.

@@ -46,6 +46,19 @@ class Config:
     donchian_exit: int = 60    # 4h barda 10 gun
     ema_macro: int = 200       # makro yon filtresi (~33 gun): ustunde sadece long, altinda sadece short
 
+    # --- v2: rejim + ortalamaya donus + volatilite hedeflemesi ---
+    enable_regime: bool = _bool("ENABLE_REGIME", "true")        # rejim bazli kol kapilama
+    enable_meanrev: bool = _bool("ENABLE_MEANREV", "true")      # yatay rejimde ortalamaya donus kolu
+    enable_vol_target: bool = _bool("ENABLE_VOL_TARGET", "true")  # volatiliteye gore boyut olcekleme
+    regime_slope_bars: int = 30    # EMA200 egimi bakis penceresi (bar)
+    meanrev_risk_mult: float = 0.5  # MR kolu islem riski carpani (trend/breakout'un yarisi)
+    rsi_period: int = 2
+    rsi_oversold: float = 10.0
+    rsi_overbought: float = 90.0
+    bb_period: int = 20
+    bb_std: float = 2.0
+    vol_window: int = 200          # goreli ATR medyani penceresi (vol hedeflemesi)
+
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
 

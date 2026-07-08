@@ -21,9 +21,9 @@ from .exchange import assert_key_safety, current_funding_rate, fetch_ohlcv_df, m
 from .indicators import add_indicators
 from .notifier import Notifier
 from .risk import MonthlyKillSwitch, RiskParams, position_size
-from .strategy import (LONG, SHORT, SLEEVES, StrategyParams, entry_signal,
-                       exit_signal, funding_blocks_entry, initial_stop,
-                       update_trailing_stop)
+from .strategy import (LONG, MEANREV, SHORT, StrategyParams, active_sleeves,
+                       entry_signal, exit_signal, funding_blocks_entry,
+                       initial_stop, update_trailing_stop)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("bot")
@@ -120,16 +120,12 @@ def close_position(ex, cfg, notifier, state, key, pos, price, reason):
 
 
 def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, marks):
-    df = add_indicators(
-        fetch_ohlcv_df(ex, symbol, cfg.timeframe, limit=500),
-        cfg.ema_fast, cfg.ema_slow, cfg.adx_period, cfg.atr_period,
-        cfg.donchian_entry, cfg.donchian_exit, cfg.ema_macro,
-    )
+    df = add_indicators(fetch_ohlcv_df(ex, symbol, cfg.timeframe, limit=500), cfg)
     row = df.iloc[-1]
     marks[symbol] = float(row.close)
     funding = current_funding_rate(ex, symbol)
 
-    for sleeve in SLEEVES:
+    for sleeve in active_sleeves(cfg):
         key = f"{symbol}|{sleeve}"
         pos = state.positions.get(key)
 
@@ -166,7 +162,11 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
             continue
         equity = get_equity(ex, cfg, state)
         stop_dist = cfg.stop_atr * float(row.atr)
-        qty = position_size(equity, float(row.close), stop_dist, open_notional(state, marks), risk)
+        risk_scale = cfg.meanrev_risk_mult if sleeve == MEANREV else 1.0
+        if cfg.enable_vol_target:
+            risk_scale *= float(row.vol_scale)
+        qty = position_size(equity, float(row.close), stop_dist,
+                            open_notional(state, marks), risk, risk_scale)
         if qty <= 0:
             continue
         place_market(ex, cfg, symbol, "buy" if side == LONG else "sell", qty)
@@ -187,7 +187,9 @@ def main():
     if not cfg.dry_run:
         assert_key_safety(ex, cfg.testnet)
     state = State(os.path.join(cfg.state_dir, "positions.json"))
-    params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr, cfg.trail_atr)
+    params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr,
+                            cfg.trail_atr, enable_regime=cfg.enable_regime,
+                            rsi_oversold=cfg.rsi_oversold, rsi_overbought=cfg.rsi_overbought)
     risk = RiskParams(cfg.risk_per_trade, cfg.max_leverage,
                       cfg.max_position_notional_pct, cfg.monthly_kill_switch,
                       max_same_direction=cfg.max_same_direction)
