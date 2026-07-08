@@ -41,8 +41,12 @@ def slice_window(data, funding, start, end, wu_days):
     return d, f
 
 
-def run_window(cfg, data, funding, start, end, equity):
+def run_window(cfg, data, funding, start, end, equity, spot=False):
     d, f = slice_window(data, funding, start, end, warmup_days(cfg.timeframe))
+    if spot:
+        cfg = dataclasses.replace(cfg, max_leverage=1.0)
+        return Backtester(d, f, cfg, start_equity=equity,
+                          taker_fee=0.001, long_only=True, apply_funding=False).run()
     return Backtester(d, f, cfg, start_equity=equity).run()
 
 
@@ -104,6 +108,8 @@ def main():
     ap.add_argument("--timeframe", default=None,
                     help="mum periyodu, orn. 1h (varsayilan: 4h). Ayni bar-parametreleriyle "
                          "daha kisa periyot = daha hizli/sik islem yapan varyant")
+    ap.add_argument("--spot", action="store_true",
+                    help="spot modu: long-only, kaldiracsiz, funding yok, %%0.1 komisyon")
     args = ap.parse_args()
 
     cfg = Config()
@@ -150,12 +156,13 @@ def main():
             print()
             return
         for wtitle, ws, we in windows:
-            result = run_window(cfg, data, funding, ws, we, args.equity)
-            print_report(metrics(result), result, symbols, wtitle)
+            result = run_window(cfg, data, funding, ws, we, args.equity, spot=args.spot)
+            print_report(metrics(result), result, symbols,
+                         wtitle + (" [SPOT long-only]" if args.spot else ""))
         return
 
-    result = run_window(cfg, data, funding, None, None, args.equity)
-    variant = "v1 (legacy)" if args.legacy else "v2"
+    result = run_window(cfg, data, funding, None, None, args.equity, spot=args.spot)
+    variant = ("SPOT long-only" if args.spot else ("v1 (legacy)" if args.legacy else "v2"))
     print_report(metrics(result), result, symbols,
                  f"HIBRIT STRATEJI [{variant}]  |  {args.days} gun  |  {', '.join(symbols)}")
 

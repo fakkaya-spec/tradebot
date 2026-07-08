@@ -75,8 +75,16 @@ class Result:
 
 
 class Backtester:
-    def __init__(self, data: dict, funding: dict, cfg, start_equity: float = 10_000.0):
-        """data: {symbol: OHLCV DataFrame}, funding: {symbol: Series veya bos}."""
+    def __init__(self, data: dict, funding: dict, cfg, start_equity: float = 10_000.0,
+                 taker_fee: float = TAKER_FEE, long_only: bool = False,
+                 apply_funding: bool = True):
+        """data: {symbol: OHLCV DataFrame}, funding: {symbol: Series veya bos}.
+
+        Spot modu icin: taker_fee=0.001, long_only=True, apply_funding=False
+        (+ cfg.max_leverage=1.0)."""
+        self.taker_fee = taker_fee
+        self.long_only = long_only
+        self.apply_funding = apply_funding
         self.cfg = cfg
         self.params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr,
                                      cfg.trail_atr, enable_regime=cfg.enable_regime,
@@ -123,9 +131,9 @@ class Backtester:
         direction = 1 if pos.side == LONG else -1
         fill = raw_price * (1 - direction * SLIPPAGE)
         gross = pos.qty * (fill - pos.entry) * direction
-        fees = pos.qty * (pos.entry + fill) * TAKER_FEE
+        fees = pos.qty * (pos.entry + fill) * self.taker_fee
         pnl = gross - fees - pos.funding_paid
-        self.cash += gross - pos.qty * fill * TAKER_FEE  # giris komisyonu aciliste dusuldu
+        self.cash += gross - pos.qty * fill * self.taker_fee  # giris komisyonu aciliste dusuldu
         self.trades.append(Trade(pos.symbol, pos.sleeve, pos.side, pos.entry_time, ts,
                                  pos.entry, fill, pos.qty, pnl, reason))
         del self.positions[key]
@@ -155,7 +163,7 @@ class Backtester:
             return
         direction = 1 if side == LONG else -1
         fill = float(row.close) * (1 + direction * SLIPPAGE)
-        self.cash -= qty * fill * TAKER_FEE
+        self.cash -= qty * fill * self.taker_fee
         self.positions[(symbol, sleeve)] = Position(
             symbol, sleeve, side, qty, fill,
             initial_stop(side, fill, atr, self.params), fill, atr, ts,
@@ -178,7 +186,9 @@ class Backtester:
                         marks[sym] = float(df.iloc[loc].close)
 
             # 1) funding tahsilati (8 saatlik grid; gunluk barlarda gunun 3 periyodu toplanir)
-            if self.bar_hours >= 24:
+            if not self.apply_funding:
+                pass
+            elif self.bar_hours >= 24:
                 for pos in self.positions.values():
                     s = self.funding.get(pos.symbol)
                     window = s.loc[ts:ts + pd.Timedelta(hours=self.bar_hours)] if s is not None and len(s) else None
@@ -230,6 +240,8 @@ class Backtester:
                         if (sym, sleeve) in self.positions:
                             continue
                         side = entry_signal(sleeve, row, self.params)
+                        if side == SHORT and self.long_only:
+                            side = None
                         if side:
                             self._try_open(sym, sleeve, side, row, ts, equity, marks)
 
