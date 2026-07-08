@@ -255,12 +255,14 @@ def main():
             if cfg.core_alerts:
                 check_core_alerts(ex, cfg, notifier, state)
             state.save()
-            if cfg.heartbeat:
+            # Nabiz gunde BIR kez atilir (heartbeat_hour'daki dongude) - islem,
+            # cekirdek ve hata bildirimleri her zaman aninda gider.
+            if cfg.heartbeat and now.hour == cfg.heartbeat_hour:
                 pos_txt = ", ".join(
                     f"{k.replace('|', ' ')} {v['side']}" for k, v in state.positions.items()
                 ) or "yok"
-                notifier.send(f"Nabiz {now.strftime('%H:%M')} UTC | {len(cfg.symbols)} parite tarandi | "
-                              f"acik pozisyon: {pos_txt} | ozsermaye: {get_equity(ex, cfg, state):.2f} USDT")
+                notifier.send(f"Gunluk nabiz | acik pozisyon: {pos_txt} | "
+                              f"ozsermaye: {get_equity(ex, cfg, state):.2f} USDT")
         except Exception as exc:
             log.exception("Dongu hatasi")
             notifier.send(f"DONGU HATASI: {exc}")

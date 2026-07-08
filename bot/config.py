@@ -64,7 +64,8 @@ class Config:
 
     telegram_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
-    heartbeat: bool = _bool("HEARTBEAT", "true")  # her donguden sonra kisa nabiz mesaji
+    heartbeat: bool = _bool("HEARTBEAT", "true")  # gunluk nabiz mesaji
+    heartbeat_hour: int = int(os.getenv("HEARTBEAT_HOUR", "12"))  # UTC saat (12 = TR 15:00)
 
     # Cekirdek (spot) uyarilari: EMA200 gecislerinde Telegram'dan haber ver.
     # Spot islemi bot YAPMAZ - kullanici elle yapar (70/30 cekirdek+uydu yapisi).
