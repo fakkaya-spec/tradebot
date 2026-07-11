@@ -249,7 +249,14 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
             "entry_time": str(row.name),
         }
         sync_stop_order(ex, cfg, symbol, side, qty, stop)
-        notifier.send(f"ACILDI {symbol} [{sleeve}] {side} qty={qty:.6f} @ {row.close:.4f} stop={stop:.4f}")
+        notional = qty * float(row.close)
+        risk_usdt = qty * abs(float(row.close) - stop)
+        notifier.send(
+            f"ACILDI {symbol} [{sleeve}] {side.upper()}\n"
+            f"miktar : {qty:.6f} (~{notional:,.2f} USDT nominal)\n"
+            f"giris  : {row.close:.4f}\n"
+            f"stop   : {stop:.4f} (risk ~{risk_usdt:,.2f} USDT)"
+        )
 
 
 def main():
@@ -339,11 +346,24 @@ def main():
             # Nabiz gunde BIR kez atilir (heartbeat_hour'daki dongude) - islem,
             # cekirdek ve hata bildirimleri her zaman aninda gider.
             if cfg.heartbeat and now.hour == cfg.heartbeat_hour:
-                pos_txt = ", ".join(
-                    f"{k.replace('|', ' ')} {v['side']}" for k, v in state.positions.items()
-                ) or "yok"
-                notifier.send(f"Gunluk nabiz | acik pozisyon: {pos_txt} | "
-                              f"ozsermaye: {get_equity(ex, cfg, state):.2f} USDT")
+                lines = [f"Gunluk nabiz | ozsermaye: {get_equity(ex, cfg, state):.2f} USDT"]
+                if state.positions:
+                    for k, v in state.positions.items():
+                        sym = k.split("|")[0]
+                        mark = marks.get(sym, v["entry"])
+                        d = 1 if v["side"] == LONG else -1
+                        upnl = v["qty"] * (mark - v["entry"]) * d
+                        locked = " (stop girisin ustunde: kar kilitli)" if (
+                            (v["side"] == LONG and v["stop"] > v["entry"]) or
+                            (v["side"] == SHORT and v["stop"] < v["entry"])) else ""
+                        lines.append(
+                            f"{k.replace('|', ' ')} {v['side'].upper()}: "
+                            f"giris {v['entry']:.4f} | guncel {mark:.4f} | "
+                            f"stop {v['stop']:.4f}{locked} | pnl {upnl:+,.2f} USDT"
+                        )
+                else:
+                    lines.append("acik pozisyon: yok")
+                notifier.send("\n".join(lines))
         except Exception as exc:
             log.exception("Dongu hatasi")
             notifier.send(f"DONGU HATASI: {exc}")
