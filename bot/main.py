@@ -169,8 +169,11 @@ def sync_stop_order(ex, cfg, symbol, pos_side, qty, stop_price):
         if order.get("type", "").lower().replace("_", "") == "stopmarket":
             ex.cancel_order(order["id"], symbol)
     close_side = "sell" if pos_side == LONG else "buy"
+    # workingType=MARK_PRICE: tetikleyici son islem fiyati degil adil fiyat
+    # (mark price) - tek barlik manipulatif igneler stop'u yalayamaz.
     ex.create_order(symbol, "STOP_MARKET", close_side, qty, None,
-                    {"stopPrice": stop_price, "reduceOnly": True})
+                    {"stopPrice": stop_price, "reduceOnly": True,
+                     "workingType": "MARK_PRICE"})
 
 
 def close_position(ex, cfg, notifier, state, key, pos, price, reason):
