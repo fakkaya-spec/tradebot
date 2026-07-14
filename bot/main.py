@@ -248,7 +248,15 @@ def sync_stop_order(ex, cfg, symbol, pos_side, qty, stop_price):
 def close_position(ex, cfg, notifier, state, key, pos, price, reason):
     symbol = key.split("|")[0]
     side = "sell" if pos["side"] == LONG else "buy"
-    place_market(ex, cfg, symbol, side, pos["qty"], reduce_only=True)
+    try:
+        place_market(ex, cfg, symbol, side, pos["qty"], reduce_only=True)
+    except Exception as exc:
+        if "-2022" in str(exc) or "ReduceOnly" in str(exc):
+            # Pozisyon borsada zaten kapali (stop borsa tarafinda tetiklenmis).
+            # Defteri temizlemeye devam et; PnL stop fiyati uzerinden tahminidir.
+            reason = reason + " (borsada zaten kapanmisti)"
+        else:
+            raise
     pnl = pos["qty"] * (price - pos["entry"]) * (1 if pos["side"] == LONG else -1)
     if cfg.dry_run:
         state.paper_equity += pnl
@@ -388,6 +396,9 @@ def main():
         try:
             marks = {}
             now = datetime.now(timezone.utc)
+            # Her dongude borsayla mutabakat: bot uyurken borsada kapanan
+            # pozisyonlar (stop) defterden dusulur - ReduceOnly hatasi olusmaz.
+            reconcile_state(ex, cfg, notifier, state)
             equity = get_equity(ex, cfg, state)
 
             # Ay kapanisi: rapor + taban tamamlama talimati (nihai para yonetimi)
