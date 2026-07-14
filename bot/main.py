@@ -329,11 +329,30 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
         sync_stop_order(ex, cfg, symbol, side, qty, stop)
         notional = qty * float(row.close)
         risk_usdt = qty * abs(float(row.close) - stop)
+        entry_price, atr = float(row.close), float(row.atr)
+        d = 1 if side == LONG else -1
+        yon = "yukari" if side == LONG else "asagi"
+        if sleeve == "trend":
+            be_trigger = entry_price + d * cfg.breakeven_atr * atr
+            plan = (
+                f"PLAN: Fiyat {be_trigger:.4f} seviyesini gorurse stop girise cekilir "
+                f"(kayip riski biter). Sonrasinda stop, en iyi fiyatin {cfg.trail_atr:.0f}xATR "
+                f"(~{cfg.trail_atr * atr:.4f}) gerisinden {yon} takip eder - sabit hedef yok, "
+                f"trend surdukce tasinir. Trend donerse (EMA20/50 kesisimi) pozisyon kapatilir. "
+                f"Stop asla aleyhte yonde oynatilmaz."
+            )
+        else:  # breakout
+            plan = (
+                f"PLAN: Stop sabittir ({stop:.4f}), trailing yapilmaz. Cikis: fiyat 10 gunluk "
+                f"kanalin karsi tarafina kapanirsa kar alinir/kesilir. Kirilim devam ederse "
+                f"pozisyon kanal boyunca tasinir."
+            )
         notifier.send(
             f"ACILDI {symbol} [{sleeve}] {side.upper()}\n"
             f"miktar : {qty:.6f} (~{notional:,.2f} USDT nominal)\n"
-            f"giris  : {row.close:.4f}\n"
-            f"stop   : {stop:.4f} (risk ~{risk_usdt:,.2f} USDT)"
+            f"giris  : {entry_price:.4f}\n"
+            f"stop   : {stop:.4f} (risk ~{risk_usdt:,.2f} USDT)\n"
+            f"{plan}"
         )
 
 
