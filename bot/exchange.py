@@ -84,14 +84,26 @@ def adjust_quantity(ex, symbol: str, qty: float, price: float,
 
 
 def fetch_net_positions(ex, symbols):
-    """Borsadaki net pozisyon miktarlari: {symbol: +qty (long) / -qty (short) / 0}."""
+    """Borsadaki net pozisyonlar: ({symbol: +qty/-qty/0}, dogrulanan semboller).
+
+    Eslestirme ccxt'nin birlesik sembolune ('ETH/USDT:USDT') degil ham borsa
+    ID'sine ('ETHUSDT') gore yapilir - format farki yuzunden acik pozisyonun
+    'kapanmis' sanilmasini onler. Borsadan hic gorulmeyen semboller 'seen'
+    kumesine girmez; cagiran taraf onlari SONUCSUZ saymalidir.
+    """
+    ids = {ex.market_id(s): s for s in symbols}
     result = {s: 0.0 for s in symbols}
-    for p in ex.fetch_positions(symbols):
-        sym = p.get("symbol")
+    seen = set()
+    for p in ex.fetch_positions():
+        raw = str((p.get("info") or {}).get("symbol") or "")
+        target = ids.get(raw)
+        if not target:
+            continue
+        seen.add(target)
         qty = float(p.get("contracts") or 0.0)
-        if sym in result and qty:
-            result[sym] += qty if p.get("side") == "long" else -qty
-    return result
+        if qty:
+            result[target] += qty if p.get("side") == "long" else -qty
+    return result, seen
 
 
 def fetch_ohlcv_df(ex, symbol: str, timeframe: str, limit: int = 300):

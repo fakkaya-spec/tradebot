@@ -82,12 +82,18 @@ def reconcile_state(ex, cfg, notifier, state):
         return
     try:
         symbols = sorted({k.split("|")[0] for k in state.positions})
-        net = fetch_net_positions(ex, symbols)
+        net, seen = fetch_net_positions(ex, symbols)
         for sym in symbols:
             keys = [k for k in state.positions if k.split("|")[0] == sym]
             state_net = sum(state.positions[k]["qty"] * (1 if state.positions[k]["side"] == LONG else -1)
                             for k in keys)
             exchange_net = net.get(sym, 0.0)
+            if sym not in seen:
+                # Borsadan bu sembol icin veri gelmedi: SONUCSUZ. Asla silme,
+                # asla emir iptal etme - sadece uyar ve kaydi koru.
+                notifier.send(f"UYARI {sym}: mutabakatta borsadan dogrulanamadi, "
+                              "kayit korunuyor (islem yapilmadi).")
+                continue
             if abs(exchange_net) < 1e-12:
                 for k in keys:
                     pos = state.positions.pop(k)
