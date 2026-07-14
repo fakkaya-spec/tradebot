@@ -44,6 +44,8 @@ class State:
         self.cooldowns = {}  # "SYMBOL|sleeve" -> {"side": ..., "until": iso}
         self.core = {}       # "SYMBOL" -> "coin" | "cash" (spot cekirdek durumu)
         self.ks = {}         # kill-switch ay durumu (restart'a dayanikli)
+        self.history = []    # kapanan islemler (haftalik rapor icin, son 100)
+        self.week = {}       # haftalik rapor cipasi: {"equity": x, "date": iso}
         self.paper_equity = PAPER_START_EQUITY
         self.load()
 
@@ -55,6 +57,8 @@ class State:
             self.cooldowns = data.get("cooldowns", {})
             self.core = data.get("core", {})
             self.ks = data.get("ks", {})
+            self.history = data.get("history", [])
+            self.week = data.get("week", {})
             self.paper_equity = data.get("paper_equity", PAPER_START_EQUITY)
 
     def save(self):
@@ -63,6 +67,7 @@ class State:
         with open(tmp, "w") as f:
             json.dump({"positions": self.positions, "cooldowns": self.cooldowns,
                        "core": self.core, "ks": self.ks,
+                       "history": self.history[-100:], "week": self.week,
                        "paper_equity": self.paper_equity}, f, indent=2)
         os.replace(tmp, self.path)
 
@@ -128,6 +133,64 @@ def check_core_alerts(ex, cfg, notifier, state):
             log.warning("%s cekirdek kontrolu basarisiz: %s", symbol, exc)
 
 
+def send_weekly_report(ex, cfg, notifier, state, marks, equity, now):
+    """Pazar gunleri: kapanan islemler, haftalik P&L, acik pozisyonlar, beklenti."""
+    lines = [f"=== HAFTALIK RAPOR ({now.strftime('%d.%m.%Y')}) ==="]
+
+    prev_eq = state.week.get("equity")
+    if prev_eq:
+        diff = equity - prev_eq
+        lines.append(f"Ozsermaye: {equity:,.2f} USDT (hafta: {diff:+,.2f} / {diff/prev_eq*100:+.1f}%)")
+    else:
+        lines.append(f"Ozsermaye: {equity:,.2f} USDT (ilk haftalik rapor)")
+
+    week_ago = (now - timedelta(days=7)).isoformat()
+    closed = [t for t in state.history if t.get("exit_time", "") >= week_ago]
+    if closed:
+        total = sum(t["pnl"] for t in closed)
+        lines.append(f"--- Kapanan islemler ({len(closed)} adet, toplam {total:+,.2f} USDT):")
+        for t in closed:
+            lines.append(f"{t['symbol']} [{t['sleeve']}] {t['side'].upper()}: "
+                         f"{t['entry']:.4f} -> {t['exit']:.4f} | {t['pnl']:+,.2f} USDT ({t['reason']})")
+    else:
+        lines.append("--- Bu hafta islem kapanmadi.")
+
+    if state.positions:
+        lines.append("--- Acik pozisyonlar:")
+        for k, v in state.positions.items():
+            sym = k.split("|")[0]
+            mark = marks.get(sym, v["entry"])
+            d = 1 if v["side"] == LONG else -1
+            upnl = v["qty"] * (mark - v["entry"]) * d
+            lines.append(f"{k.replace('|', ' ')} {v['side'].upper()}: giris {v['entry']:.4f} | "
+                         f"stop {v['stop']:.4f} | pnl {upnl:+,.2f} USDT")
+    else:
+        lines.append("--- Acik pozisyon yok.")
+
+    lines.append("--- Beklenti (uc kilit: EMA200 tarafi / momentum / ADX>25):")
+    for symbol in cfg.symbols:
+        try:
+            df = add_indicators(fetch_ohlcv_df(ex, symbol, cfg.timeframe, limit=500), cfg)
+            row = df.iloc[-1]
+            macro = "ustu" if row.close > row.ema_macro else "alti"
+            mom = "yukari" if row.ema_fast > row.ema_slow else "asagi"
+            locks = [row.close > row.ema_macro, row.ema_fast > row.ema_slow,
+                     row.adx > cfg.adx_threshold]
+            if all(locks):
+                verdict = "LONG kosullari tamam/yakin"
+            elif not locks[0] and not locks[1] and locks[2]:
+                verdict = "SHORT kosullari tamam/yakin"
+            else:
+                verdict = "bekleniyor"
+            lines.append(f"{symbol}: EMA200 {macro}, momentum {mom}, "
+                         f"ADX {row.adx:.0f} -> {verdict}")
+        except Exception as exc:
+            log.warning("%s beklenti hesabi basarisiz: %s", symbol, exc)
+
+    notifier.send("\n".join(lines))
+    state.week = {"equity": equity, "date": now.isoformat()}
+
+
 def sleep_until_next_close():
     now = time.time()
     next_close = (int(now) // TIMEFRAME_SECONDS + 1) * TIMEFRAME_SECONDS
@@ -187,6 +250,12 @@ def close_position(ex, cfg, notifier, state, key, pos, price, reason):
     if reason == "stop":
         until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
         state.cooldowns[key] = {"side": pos["side"], "until": until.isoformat()}
+    state.history.append({
+        "symbol": symbol, "sleeve": key.split("|")[1], "side": pos["side"],
+        "entry": pos["entry"], "exit": price, "qty": pos["qty"], "pnl": pnl,
+        "reason": reason, "entry_time": pos.get("entry_time", ""),
+        "exit_time": datetime.now(timezone.utc).isoformat(),
+    })
     notifier.send(f"KAPANDI {symbol} [{key.split('|')[1]}] {pos['side']} @ {price:.4f} | {reason} | PnL~{pnl:+.2f} USDT")
 
 
@@ -367,6 +436,12 @@ def main():
                 else:
                     lines.append("acik pozisyon: yok")
                 notifier.send("\n".join(lines))
+
+            # Haftalik rapor: Pazar gunleri nabiz saatinde
+            if (cfg.weekly_report and now.weekday() == cfg.weekly_report_day
+                    and now.hour == cfg.heartbeat_hour):
+                send_weekly_report(ex, cfg, notifier, state, marks,
+                                   get_equity(ex, cfg, state), now)
         except Exception as exc:
             log.exception("Dongu hatasi")
             notifier.send(f"DONGU HATASI: {exc}")

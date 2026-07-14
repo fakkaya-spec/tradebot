@@ -76,6 +76,8 @@ class Config:
     telegram_chat_id: str = os.getenv("TELEGRAM_CHAT_ID", "")
     heartbeat: bool = _bool("HEARTBEAT", "true")  # gunluk nabiz mesaji
     heartbeat_hour: int = int(os.getenv("HEARTBEAT_HOUR", "12"))  # UTC saat (12 = TR 15:00)
+    weekly_report: bool = _bool("WEEKLY_REPORT", "true")  # Pazar gunu haftalik ozet
+    weekly_report_day: int = int(os.getenv("WEEKLY_REPORT_DAY", "6"))  # 0=Pzt ... 6=Pazar
 
     # Cekirdek (spot) uyarilari: EMA200 gecislerinde Telegram'dan haber ver.
     # Spot islemi bot YAPMAZ - kullanici elle yapar (70/30 cekirdek+uydu yapisi).
