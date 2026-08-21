@@ -228,6 +228,14 @@ def place_market(ex, cfg, symbol, side, qty, reduce_only=False):
     ex.create_order(symbol, "market", side, qty, None, params)
 
 
+def is_stop_order(order) -> bool:
+    """Stop/kosullu emir tespiti: emir tipinin adina degil tetik fiyatinin
+    varligina bakar - ccxt surumleri tipi farkli adlandirabiliyor."""
+    info = order.get("info") or {}
+    return bool(order.get("stopPrice") or order.get("triggerPrice")
+                or info.get("stopPrice") or info.get("triggerPrice"))
+
+
 def sync_stop_order(ex, cfg, symbol, pos_side, qty, stop_price):
     """Pozisyonun borsa tarafindaki STOP_MARKET emrini gunceller - bot
     coksede stop borsada durur."""
@@ -235,7 +243,7 @@ def sync_stop_order(ex, cfg, symbol, pos_side, qty, stop_price):
         log.info("[DRY_RUN] %s STOP_MARKET @ %.4f", symbol, stop_price)
         return
     for order in ex.fetch_open_orders(symbol):
-        if order.get("type", "").lower().replace("_", "") == "stopmarket":
+        if is_stop_order(order):
             ex.cancel_order(order["id"], symbol)
     close_side = "sell" if pos_side == LONG else "buy"
     # workingType=MARK_PRICE: tetikleyici son islem fiyati degil adil fiyat

@@ -15,9 +15,11 @@ from .main import State
 def stop_orders(ex, symbol):
     out = []
     for o in ex.fetch_open_orders(symbol):
-        if o.get("type", "").lower().replace("_", "") == "stopmarket":
-            price = o.get("stopPrice") or (o.get("info") or {}).get("stopPrice")
-            out.append({"price": float(price or 0), "qty": float(o.get("amount") or 0),
+        info = o.get("info") or {}
+        price = (o.get("stopPrice") or o.get("triggerPrice")
+                 or info.get("stopPrice") or info.get("triggerPrice"))
+        if price:
+            out.append({"price": float(price), "qty": float(o.get("amount") or 0),
                         "side": o.get("side")})
     return out
 
