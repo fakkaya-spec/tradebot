@@ -88,7 +88,9 @@ def main():
     for key in keys:
         m = monthly[key]
         net = m["pnl"] + m["funding"] + m["fee"]
-        base = max(starts[key], 1.0)
+        # yuzde tabani: ay basi cuzdan + o ay yatirilan (ay ortasi yatirimlar
+        # yuzdeyi sacmalatmasin)
+        base = max(starts[key] + m["transfer"], 1.0)
         pct = net / base * 100
         bar = "#" * min(60, int(abs(pct) * 2))
         total_net += net
