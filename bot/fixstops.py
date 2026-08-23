@@ -25,11 +25,12 @@ def main():
     cancelled = 0
     for sym in symbols:
         try:
-            orders = ex.fetch_open_orders(sym)
-            if orders:
-                ex.cancel_all_orders(sym)
-                cancelled += len(orders)
-                print(f"{sym}: {len(orders)} acik emir iptal edildi")
+            seen = len(ex.fetch_open_orders(sym))
+            # Kosulsuz cancel-all: API acik emir listesinde kosullu emirleri
+            # gostermese bile borsa tarafinda hepsi iptal edilir.
+            ex.cancel_all_orders(sym)
+            cancelled += seen
+            print(f"{sym}: cancel-all gonderildi (listede gorunen: {seen})")
         except Exception as exc:
             print(f"{sym}: iptal hatasi: {exc}")
 
