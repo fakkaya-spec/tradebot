@@ -47,7 +47,7 @@ class Config:
     ema_fast: int = 20
     ema_slow: int = 50
     adx_period: int = 14
-    adx_threshold: float = 25.0
+    adx_threshold: float = float(os.getenv("ADX_THRESHOLD", "25"))
     atr_period: int = 14
     stop_atr: float = 2.0
     breakeven_atr: float = 1.5
