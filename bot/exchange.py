@@ -83,23 +83,48 @@ def adjust_quantity(ex, symbol: str, qty: float, price: float,
     return candidate
 
 
+def fetch_conditional_orders(ex, symbol: str):
+    """Kosullu (stop) emir deposunu okur. ccxt 4.5.x binanceusdm'de
+    STOP_MARKET emirleri ayri depoda yasar ve ancak {'stop': True}
+    parametresiyle gorunur (probe ile dogrulandi)."""
+    try:
+        return ex.fetch_open_orders(symbol, params={"stop": True})
+    except Exception as exc:
+        log.warning("%s kosullu emirler okunamadi: %s", symbol, exc)
+        return []
+
+
 def cancel_all_symbol_orders(ex, symbol: str) -> bool:
-    """Semboldeki TUM acik emirleri iptal eder. Once ham Binance endpoint'i
-    (DELETE /fapi/v1/allOpenOrders - kosullu emirler dahil kesin), olmazsa
-    ccxt cancel_all_orders. Ikisi de basarisizsa False doner."""
-    errors = []
+    """Semboldeki TUM acik emirleri iptal eder - IKI depoyu birden:
+
+    1) Kosullu depo (STOP_MARKET'lerin yasadigi yer): toplu iptal denenir,
+       desteklenmiyorsa tek tek ID ile silinir ({'stop': True} ile).
+    2) Klasik depo: ham DELETE allOpenOrders (zararsiz, garanti temizlik).
+    """
+    ok = True
+    try:
+        ex.cancel_all_orders(symbol, params={"stop": True})
+    except Exception:
+        for o in fetch_conditional_orders(ex, symbol):
+            try:
+                ex.cancel_order(o["id"], symbol, params={"stop": True})
+            except Exception as exc:
+                log.warning("%s kosullu emir %s iptal edilemedi: %s",
+                            symbol, o.get("id"), exc)
+                ok = False
     try:
         ex.fapiPrivateDeleteAllOpenOrders({"symbol": ex.market_id(symbol)})
-        return True
-    except Exception as exc:
-        errors.append(f"raw: {exc}")
-    try:
-        ex.cancel_all_orders(symbol)
-        return True
-    except Exception as exc:
-        errors.append(f"ccxt: {exc}")
-    log.warning("%s cancel-all BASARISIZ: %s", symbol, " | ".join(errors))
-    return False
+    except Exception:
+        try:
+            ex.cancel_all_orders(symbol)
+        except Exception as exc:
+            log.warning("%s klasik depo temizlenemedi: %s", symbol, exc)
+    # dogrulama: kosullu depoda kalan var mi?
+    kalan = len(fetch_conditional_orders(ex, symbol))
+    if kalan:
+        log.warning("%s: iptal sonrasi kosullu depoda %d emir kaldi", symbol, kalan)
+        ok = False
+    return ok
 
 
 def _position_risk(ex, market_id: str):

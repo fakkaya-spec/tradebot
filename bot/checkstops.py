@@ -13,18 +13,17 @@ from .main import State
 
 
 def stop_orders(ex, symbol):
-    """Ham Binance endpoint'i kullanir - bazi ccxt surumlerinin kosullu
-    emirleri listelememe sorunundan etkilenmez."""
-    try:
-        rows = ex.fapiPrivateGetOpenOrders({"symbol": ex.market_id(symbol)})
-    except Exception:
-        rows = [o.get("info") or {} for o in ex.fetch_open_orders(symbol)]
+    """Kosullu emir deposundan okur ({'stop': True}) - STOP_MARKET'lerin
+    gercekten yasadigi yer (probe ile dogrulandi)."""
+    from .exchange import fetch_conditional_orders
     out = []
-    for o in rows:
-        price = float(o.get("stopPrice") or 0)
-        if price > 0:
-            out.append({"price": price, "qty": float(o.get("origQty") or 0),
-                        "side": (o.get("side") or "").lower()})
+    for o in fetch_conditional_orders(ex, symbol):
+        info = o.get("info") or {}
+        price = (o.get("stopPrice") or o.get("triggerPrice")
+                 or info.get("stopPrice") or info.get("triggerPrice") or 0)
+        out.append({"price": float(price or 0),
+                    "qty": float(o.get("amount") or info.get("origQty") or 0),
+                    "side": (o.get("side") or "").lower()})
     return out
 
 

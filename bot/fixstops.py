@@ -5,17 +5,19 @@ Kullanim (Railway Console): source /root/.profile && python -m bot.fixstops
 import os
 
 from .config import Config
-from .exchange import cancel_all_symbol_orders, make_exchange
+from .exchange import (cancel_all_symbol_orders, fetch_conditional_orders,
+                       make_exchange)
 from .main import LONG, State
 from .notifier import Notifier
 
 
 def raw_count(ex, symbol) -> int:
+    """Iki deponun toplami: kosullu (stop) + klasik."""
     try:
-        return len(ex.fapiPrivateGetOpenOrders({"symbol": ex.market_id(symbol)}))
-    except Exception as exc:
-        print(f"  sayim hatasi ({symbol}): {exc}")
-        return -1
+        klasik = len(ex.fapiPrivateGetOpenOrders({"symbol": ex.market_id(symbol)}))
+    except Exception:
+        klasik = 0
+    return len(fetch_conditional_orders(ex, symbol)) + klasik
 
 
 def main():
