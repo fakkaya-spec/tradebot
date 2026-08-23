@@ -10,6 +10,29 @@ def rma(series: pd.Series, period: int) -> pd.Series:
     return series.ewm(alpha=1.0 / period, adjust=False).mean()
 
 
+def supertrend_dir(df: pd.DataFrame, period: int = 10, mult: float = 3.0) -> np.ndarray:
+    """Klasik Supertrend yonu: +1 bullish, -1 bearish."""
+    h, l, c = df["high"].values, df["low"].values, df["close"].values
+    hl2 = (h + l) / 2.0
+    prev_c = np.roll(c, 1)
+    prev_c[0] = c[0]
+    tr = np.maximum(h - l, np.maximum(np.abs(h - prev_c), np.abs(l - prev_c)))
+    atr = pd.Series(tr).ewm(alpha=1.0 / period, adjust=False).mean().values
+    ub, lb = hl2 + mult * atr, hl2 - mult * atr
+    fub, flb = ub.copy(), lb.copy()
+    direction = np.ones(len(c), dtype=int)
+    for i in range(1, len(c)):
+        fub[i] = ub[i] if (ub[i] < fub[i - 1] or c[i - 1] > fub[i - 1]) else fub[i - 1]
+        flb[i] = lb[i] if (lb[i] > flb[i - 1] or c[i - 1] < flb[i - 1]) else flb[i - 1]
+        if c[i] > fub[i - 1]:
+            direction[i] = 1
+        elif c[i] < flb[i - 1]:
+            direction[i] = -1
+        else:
+            direction[i] = direction[i - 1]
+    return direction
+
+
 def add_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     """OHLCV DataFrame'ine tum strateji kolonlarini ekler.
 
@@ -64,6 +87,10 @@ def add_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     rel_atr = df["atr"] / c
     med = rel_atr.rolling(cfg.vol_window).median()
     df["vol_scale"] = (med / rel_atr).clip(0.5, 1.5).fillna(1.0)
+
+    # Supertrend kolu (varsayilan kapali; ENABLE_SUPERTREND ile acilir)
+    if getattr(cfg, "enable_supertrend", False):
+        df["st_dir"] = supertrend_dir(df, cfg.st_period, cfg.st_mult)
 
     # Rejim: guclu ADX + fiyat EMA200'un dogru tarafinda + EMA200 egimi ayni yonde
     slope = df["ema_macro"].diff(cfg.regime_slope_bars)

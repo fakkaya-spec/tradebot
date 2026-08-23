@@ -22,14 +22,24 @@ from .indicators import REGIME_DOWN, REGIME_RANGE, REGIME_UP
 TREND = "trend"
 BREAKOUT = "breakout"
 MEANREV = "meanrev"
-SLEEVES = (TREND, BREAKOUT, MEANREV)
+SUPERTREND = "supertrend"
+SLEEVES = (TREND, BREAKOUT, MEANREV, SUPERTREND)
 
 LONG = "long"
 SHORT = "short"
 
 
 def active_sleeves(cfg):
-    return SLEEVES if cfg.enable_meanrev else (TREND, BREAKOUT)
+    out = []
+    if getattr(cfg, "enable_trend", True):
+        out.append(TREND)
+    if getattr(cfg, "enable_breakout", True):
+        out.append(BREAKOUT)
+    if cfg.enable_meanrev:
+        out.append(MEANREV)
+    if getattr(cfg, "enable_supertrend", False):
+        out.append(SUPERTREND)
+    return tuple(out)
 
 
 @dataclass
@@ -72,6 +82,15 @@ def entry_signal(sleeve: str, row, params: StrategyParams):
                     return SHORT
         return None
 
+    if sleeve == SUPERTREND:
+        # Kuzen deneyinden dogan kol: Supertrend yonu + makro filtre.
+        # Fren sistemi (stop/trailing/boyutlama) motorun genel katmanindan gelir.
+        if macro_long and row.st_dir == 1:
+            return LONG
+        if not macro_long and row.st_dir == -1:
+            return SHORT
+        return None
+
     if sleeve == MEANREV:
         if row.bb_lower != row.bb_lower:  # NaN kontrolu
             return None
@@ -101,6 +120,10 @@ def exit_signal(sleeve: str, row, side: str) -> bool:
         return (side == LONG and row.close >= row.bb_mid) or (
             side == SHORT and row.close <= row.bb_mid
         )
+    if sleeve == SUPERTREND:
+        return (side == LONG and row.st_dir == -1) or (
+            side == SHORT and row.st_dir == 1
+        )
     raise ValueError(f"bilinmeyen kol: {sleeve}")
 
 
@@ -109,9 +132,9 @@ def initial_stop(side: str, entry_price: float, atr: float, params: StrategyPara
 
 
 def update_trailing_stop(sleeve, side, entry_price, entry_atr, best_price, atr_now, stop, params):
-    """Trend kolunda basabas + iz suren stop; diger kollarda stop sabittir
-    (breakout'u Donchian exit, meanrev'i orta bant yonetir)."""
-    if sleeve != TREND:
+    """Trend ve supertrend kollarinda basabas + iz suren stop; diger kollarda
+    stop sabittir (breakout'u Donchian exit, meanrev'i orta bant yonetir)."""
+    if sleeve not in (TREND, SUPERTREND):
         return stop
     if side == LONG:
         if best_price - entry_price >= params.breakeven_atr * entry_atr:

@@ -63,6 +63,13 @@ class Config:
     enable_regime: bool = _bool("ENABLE_REGIME", "false")        # rejim bazli kol kapilama
     enable_meanrev: bool = _bool("ENABLE_MEANREV", "false")      # yatay rejimde ortalamaya donus kolu
     enable_vol_target: bool = _bool("ENABLE_VOL_TARGET", "true")  # volatiliteye gore boyut olcekleme
+
+    # Kol ac/kapa bayraklari (deney icin; canli varsayilan: trend+breakout)
+    enable_trend: bool = _bool("ENABLE_TREND", "true")
+    enable_breakout: bool = _bool("ENABLE_BREAKOUT", "true")
+    enable_supertrend: bool = _bool("ENABLE_SUPERTREND", "false")  # kuzen deneyi kolu
+    st_period: int = int(os.getenv("ST_PERIOD", "10"))
+    st_mult: float = float(os.getenv("ST_MULT", "3.0"))
     regime_slope_bars: int = 30    # EMA200 egimi bakis penceresi (bar)
     meanrev_risk_mult: float = 0.5  # MR kolu islem riski carpani (trend/breakout'un yarisi)
     rsi_period: int = 2
