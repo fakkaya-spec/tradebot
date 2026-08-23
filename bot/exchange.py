@@ -83,26 +83,38 @@ def adjust_quantity(ex, symbol: str, qty: float, price: float,
     return candidate
 
 
+def _position_risk(ex, market_id: str):
+    """Ham positionRisk sorgusu (sembol bazli). Basarili cagri sifir
+    pozisyonu da ACIKCA soyler - ccxt'nin sifirlari gizlemesinden etkilenmez.
+    Basarisizsa None doner."""
+    for meth in ("fapiPrivateV2GetPositionRisk", "fapiPrivateV3GetPositionRisk",
+                 "fapiPrivateGetPositionRisk"):
+        fn = getattr(ex, meth, None)
+        if fn is None:
+            continue
+        try:
+            return fn({"symbol": market_id})
+        except Exception as exc:
+            log.debug("%s %s basarisiz: %s", meth, market_id, exc)
+    return None
+
+
 def fetch_net_positions(ex, symbols):
     """Borsadaki net pozisyonlar: ({symbol: +qty/-qty/0}, dogrulanan semboller).
 
-    Eslestirme ccxt'nin birlesik sembolune ('ETH/USDT:USDT') degil ham borsa
-    ID'sine ('ETHUSDT') gore yapilir - format farki yuzunden acik pozisyonun
-    'kapanmis' sanilmasini onler. Borsadan hic gorulmeyen semboller 'seen'
-    kumesine girmez; cagiran taraf onlari SONUCSUZ saymalidir.
+    Sembol basina ham positionRisk sorgusu yapilir: basarili cevap (bos liste
+    dahil) kesin bilgidir - bos/sifir = pozisyon kapali. Yalnizca sorgunun
+    kendisi basarisizsa sembol 'seen' disinda kalir ve cagiran taraf onu
+    SONUCSUZ sayar (silme/iptal yapmaz).
     """
-    ids = {ex.market_id(s): s for s in symbols}
     result = {s: 0.0 for s in symbols}
     seen = set()
-    for p in ex.fetch_positions():
-        raw = str((p.get("info") or {}).get("symbol") or "")
-        target = ids.get(raw)
-        if not target:
+    for s in symbols:
+        rows = _position_risk(ex, ex.market_id(s))
+        if rows is None:
             continue
-        seen.add(target)
-        qty = float(p.get("contracts") or 0.0)
-        if qty:
-            result[target] += qty if p.get("side") == "long" else -qty
+        result[s] = sum(float(r.get("positionAmt") or 0.0) for r in rows)
+        seen.add(s)
     return result, seen
 
 
