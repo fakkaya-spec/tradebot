@@ -41,13 +41,13 @@ def slice_window(data, funding, start, end, wu_days):
     return d, f
 
 
-def run_window(cfg, data, funding, start, end, equity, spot=False):
+def run_window(cfg, data, funding, start, end, equity, spot=False, long_only=False):
     d, f = slice_window(data, funding, start, end, warmup_days(cfg.timeframe))
     if spot:
         cfg = dataclasses.replace(cfg, max_leverage=1.0)
         return Backtester(d, f, cfg, start_equity=equity,
                           taker_fee=0.001, long_only=True, apply_funding=False).run()
-    return Backtester(d, f, cfg, start_equity=equity).run()
+    return Backtester(d, f, cfg, start_equity=equity, long_only=long_only).run()
 
 
 def print_report(m: dict, result, symbols, title):
@@ -110,6 +110,8 @@ def main():
                          "daha kisa periyot = daha hizli/sik islem yapan varyant")
     ap.add_argument("--spot", action="store_true",
                     help="spot modu: long-only, kaldiracsiz, funding yok, %%0.1 komisyon")
+    ap.add_argument("--long-only", action="store_true",
+                    help="futures kosullari AYNEN korunur, sadece short girisleri atlanir")
     args = ap.parse_args()
 
     cfg = Config()
@@ -156,13 +158,18 @@ def main():
             print()
             return
         for wtitle, ws, we in windows:
-            result = run_window(cfg, data, funding, ws, we, args.equity, spot=args.spot)
+            result = run_window(cfg, data, funding, ws, we, args.equity,
+                                spot=args.spot, long_only=args.long_only)
             print_report(metrics(result), result, symbols,
-                         wtitle + (" [SPOT long-only]" if args.spot else ""))
+                         wtitle + (" [SPOT long-only]" if args.spot else "")
+                         + (" [LONG-ONLY futures]" if args.long_only else ""))
         return
 
-    result = run_window(cfg, data, funding, None, None, args.equity, spot=args.spot)
-    variant = ("SPOT long-only" if args.spot else ("v1 (legacy)" if args.legacy else "v2"))
+    result = run_window(cfg, data, funding, None, None, args.equity,
+                        spot=args.spot, long_only=args.long_only)
+    variant = ("SPOT long-only" if args.spot
+               else ("LONG-ONLY futures" if args.long_only
+                     else ("v1 (legacy)" if args.legacy else "v2")))
     print_report(metrics(result), result, symbols,
                  f"HIBRIT STRATEJI [{variant}]  |  {args.days} gun  |  {', '.join(symbols)}")
 
