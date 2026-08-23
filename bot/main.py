@@ -353,6 +353,16 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
         d = 1 if side == LONG else -1
         yon = "yukari" if side == LONG else "asagi"
         if sleeve == "trend":
+            neden = (f"NEDEN: fiyat EMA200'un {'USTUNDE' if side == LONG else 'ALTINDA'} "
+                     f"({float(row.ema_macro):.4f}) + EMA20 {'>' if side == LONG else '<'} EMA50 "
+                     f"(momentum {yon}) + ADX {float(row.adx):.1f} > {cfg.adx_threshold:.0f} "
+                     f"(trend guclu) -> uc kosul tamam, trend {side} sinyali.")
+        else:
+            level = float(row.don_hi) if side == LONG else float(row.don_lo)
+            neden = (f"NEDEN: fiyat 20 gunluk {'zirveyi' if side == LONG else 'dibi'} "
+                     f"({level:.4f}) {yon} yonde kirip kapatti + EMA200 filtresi uyumlu "
+                     f"-> kirilim {side} sinyali.")
+        if sleeve == "trend":
             be_trigger = entry_price + d * cfg.breakeven_atr * atr
             plan = (
                 f"PLAN: Fiyat {be_trigger:.4f} seviyesini gorurse stop girise cekilir "
@@ -372,6 +382,7 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
             f"miktar : {qty:.6f} (~{notional:,.2f} USDT nominal)\n"
             f"giris  : {entry_price:.4f}\n"
             f"stop   : {stop:.4f} (risk ~{risk_usdt:,.2f} USDT)\n"
+            f"{neden}\n"
             f"{plan}"
         )
 
