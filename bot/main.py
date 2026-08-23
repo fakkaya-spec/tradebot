@@ -100,8 +100,7 @@ def reconcile_state(ex, cfg, notifier, state):
                     until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
                     state.cooldowns[k] = {"side": pos["side"], "until": until.isoformat()}
                 try:
-                    for order in ex.fetch_open_orders(sym):
-                        ex.cancel_order(order["id"], sym)
+                    ex.cancel_all_orders(sym)
                 except Exception as exc:
                     log.warning("%s artik emirler temizlenemedi: %s", sym, exc)
                 notifier.send(f"MUTABAKAT {sym}: pozisyon bot cevrimdisiyken borsada kapanmis "
@@ -228,29 +227,29 @@ def place_market(ex, cfg, symbol, side, qty, reduce_only=False):
     ex.create_order(symbol, "market", side, qty, None, params)
 
 
-def is_stop_order(order) -> bool:
-    """Stop/kosullu emir tespiti: emir tipinin adina degil tetik fiyatinin
-    varligina bakar - ccxt surumleri tipi farkli adlandirabiliyor."""
-    info = order.get("info") or {}
-    return bool(order.get("stopPrice") or order.get("triggerPrice")
-                or info.get("stopPrice") or info.get("triggerPrice"))
+def sync_stop_order(ex, cfg, state, symbol):
+    """Semboldeki stop emirlerini SIFIRDAN kurar: once cancel-all, sonra
+    defterdeki her pozisyon icin tek STOP_MARKET.
 
-
-def sync_stop_order(ex, cfg, symbol, pos_side, qty, stop_price):
-    """Pozisyonun borsa tarafindaki STOP_MARKET emrini gunceller - bot
-    coksede stop borsada durur."""
+    'Listele-bul-iptal et' yontemi kullanilmaz: bazi ccxt surumleri kosullu
+    emirleri acik emir listesinde gostermiyor ve bu, stop birikmesine yol
+    aciyordu. Cancel-all borsa tarafinda listeden bagimsiz calisir.
+    """
     if cfg.dry_run:
-        log.info("[DRY_RUN] %s STOP_MARKET @ %.4f", symbol, stop_price)
+        log.info("[DRY_RUN] %s stoplar senkronlanirdi", symbol)
         return
-    for order in ex.fetch_open_orders(symbol):
-        if is_stop_order(order):
-            ex.cancel_order(order["id"], symbol)
-    close_side = "sell" if pos_side == LONG else "buy"
-    # workingType=MARK_PRICE: tetikleyici son islem fiyati degil adil fiyat
-    # (mark price) - tek barlik manipulatif igneler stop'u yalayamaz.
-    ex.create_order(symbol, "STOP_MARKET", close_side, qty, None,
-                    {"stopPrice": stop_price, "reduceOnly": True,
-                     "workingType": "MARK_PRICE"})
+    try:
+        ex.cancel_all_orders(symbol)
+    except Exception as exc:
+        log.warning("%s cancel-all hatasi: %s", symbol, exc)
+    for key, pos in state.positions.items():
+        if key.split("|")[0] != symbol:
+            continue
+        close_side = "sell" if pos["side"] == LONG else "buy"
+        # workingType=MARK_PRICE: tek barlik manipulatif igneler tetikleyemez.
+        ex.create_order(symbol, "STOP_MARKET", close_side, pos["qty"], None,
+                        {"stopPrice": pos["stop"], "reduceOnly": True,
+                         "workingType": "MARK_PRICE"})
 
 
 def close_position(ex, cfg, notifier, state, key, pos, price, reason):
@@ -272,6 +271,11 @@ def close_position(ex, cfg, notifier, state, key, pos, price, reason):
     if reason == "stop":
         until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
         state.cooldowns[key] = {"side": pos["side"], "until": until.isoformat()}
+    if not cfg.dry_run:
+        try:
+            sync_stop_order(ex, cfg, state, symbol)
+        except Exception as exc:
+            log.warning("%s kapanis sonrasi stop senkronu: %s", symbol, exc)
     state.history.append({
         "symbol": symbol, "sleeve": key.split("|")[1], "side": pos["side"],
         "entry": pos["entry"], "exit": price, "qty": pos["qty"], "pnl": pnl,
@@ -308,7 +312,7 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
                 continue
             if new_stop != pos["stop"]:
                 pos["stop"] = new_stop
-                sync_stop_order(ex, cfg, symbol, pos["side"], pos["qty"], new_stop)
+                sync_stop_order(ex, cfg, state, symbol)
             continue
 
         if ks_tripped:
@@ -342,7 +346,7 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
             "best": float(row.close), "entry_atr": float(row.atr),
             "entry_time": str(row.name),
         }
-        sync_stop_order(ex, cfg, symbol, side, qty, stop)
+        sync_stop_order(ex, cfg, state, symbol)
         notional = qty * float(row.close)
         risk_usdt = qty * abs(float(row.close) - stop)
         entry_price, atr = float(row.close), float(row.atr)

@@ -55,7 +55,7 @@ def main():
             "best": close, "entry_atr": atr, "entry_time": "adopt",
         }
         state.cooldowns.pop(key, None)
-        sync_stop_order(ex, cfg, symbol, side, abs(qty), stop)
+        sync_stop_order(ex, cfg, state, symbol)
         state.save()
         adopted += 1
         msg = (f"KURTARILDI {symbol} [{TREND}] {side.upper()}\n"
