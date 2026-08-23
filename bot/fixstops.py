@@ -1,13 +1,21 @@
-"""Stop temizligi: her sembolde cancel-all + defterden dogru stoplari kurar.
+"""Stop temizligi + teshis: her adimda ham emir sayisini raporlar.
 
 Kullanim (Railway Console): source /root/.profile && python -m bot.fixstops
 """
 import os
 
 from .config import Config
-from .exchange import make_exchange
-from .main import State, sync_stop_order
+from .exchange import cancel_all_symbol_orders, make_exchange
+from .main import LONG, State
 from .notifier import Notifier
+
+
+def raw_count(ex, symbol) -> int:
+    try:
+        return len(ex.fapiPrivateGetOpenOrders({"symbol": ex.market_id(symbol)}))
+    except Exception as exc:
+        print(f"  sayim hatasi ({symbol}): {exc}")
+        return -1
 
 
 def main():
@@ -18,14 +26,30 @@ def main():
     state = State(os.path.join(cfg.state_dir, "positions.json"))
 
     symbols = sorted({k.split("|")[0] for k in state.positions} | set(cfg.symbols))
-    placed = 0
+    total_placed = 0
     for sym in symbols:
-        sync_stop_order(ex, cfg, state, sym)  # cancel-all + defterden yeniden kur
-        n = sum(1 for k in state.positions if k.split("|")[0] == sym)
-        placed += n
-        print(f"{sym}: cancel-all + {n} stop kuruldu")
+        before = raw_count(ex, sym)
+        ok = cancel_all_symbol_orders(ex, sym)
+        after = raw_count(ex, sym)
+        print(f"{sym}: emir {before} -> cancel-all({'OK' if ok else 'HATA'}) -> {after}")
 
-    msg = f"STOP TEMIZLIGI: tum semboller sifirlandi, {placed} dogru stop kuruldu."
+        placed = 0
+        for key, pos in state.positions.items():
+            if key.split("|")[0] != sym:
+                continue
+            close_side = "sell" if pos["side"] == LONG else "buy"
+            try:
+                ex.create_order(sym, "STOP_MARKET", close_side, pos["qty"], None,
+                                {"stopPrice": pos["stop"], "reduceOnly": True,
+                                 "workingType": "MARK_PRICE"})
+                placed += 1
+                print(f"  {key}: stop kuruldu @ {pos['stop']:.4f}")
+            except Exception as exc:
+                print(f"  {key}: STOP KURULAMADI: {exc}")
+        total_placed += placed
+        print(f"{sym}: son durum = {raw_count(ex, sym)} emir (beklenen: {placed})")
+
+    msg = f"STOP TEMIZLIGI: tamamlandi, {total_placed} stop kuruldu. Detay console ciktisinda."
     print(msg)
     notifier.send(msg)
 

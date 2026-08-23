@@ -83,6 +83,25 @@ def adjust_quantity(ex, symbol: str, qty: float, price: float,
     return candidate
 
 
+def cancel_all_symbol_orders(ex, symbol: str) -> bool:
+    """Semboldeki TUM acik emirleri iptal eder. Once ham Binance endpoint'i
+    (DELETE /fapi/v1/allOpenOrders - kosullu emirler dahil kesin), olmazsa
+    ccxt cancel_all_orders. Ikisi de basarisizsa False doner."""
+    errors = []
+    try:
+        ex.fapiPrivateDeleteAllOpenOrders({"symbol": ex.market_id(symbol)})
+        return True
+    except Exception as exc:
+        errors.append(f"raw: {exc}")
+    try:
+        ex.cancel_all_orders(symbol)
+        return True
+    except Exception as exc:
+        errors.append(f"ccxt: {exc}")
+    log.warning("%s cancel-all BASARISIZ: %s", symbol, " | ".join(errors))
+    return False
+
+
 def _position_risk(ex, market_id: str):
     """Ham positionRisk sorgusu (sembol bazli). Basarili cagri sifir
     pozisyonu da ACIKCA soyler - ccxt'nin sifirlari gizlemesinden etkilenmez.

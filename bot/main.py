@@ -17,7 +17,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 from .config import Config
-from .exchange import (adjust_quantity, assert_key_safety, current_funding_rate,
+from .exchange import (adjust_quantity, assert_key_safety,
+                       cancel_all_symbol_orders, current_funding_rate,
                        fetch_net_positions, fetch_ohlcv_df, make_exchange,
                        prepare_symbol)
 from .indicators import add_indicators
@@ -99,10 +100,7 @@ def reconcile_state(ex, cfg, notifier, state):
                     pos = state.positions.pop(k)
                     until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
                     state.cooldowns[k] = {"side": pos["side"], "until": until.isoformat()}
-                try:
-                    ex.cancel_all_orders(sym)
-                except Exception as exc:
-                    log.warning("%s artik emirler temizlenemedi: %s", sym, exc)
+                cancel_all_symbol_orders(ex, sym)
                 notifier.send(f"MUTABAKAT {sym}: pozisyon bot cevrimdisiyken borsada kapanmis "
                               "(muhtemelen stop). Kayit temizlendi, cooldown uygulandi.")
             elif abs(exchange_net - state_net) > 1e-9:
@@ -238,10 +236,8 @@ def sync_stop_order(ex, cfg, state, symbol):
     if cfg.dry_run:
         log.info("[DRY_RUN] %s stoplar senkronlanirdi", symbol)
         return
-    try:
-        ex.cancel_all_orders(symbol)
-    except Exception as exc:
-        log.warning("%s cancel-all hatasi: %s", symbol, exc)
+    if not cancel_all_symbol_orders(ex, symbol):
+        log.warning("%s: eski stoplar iptal edilemedi, yine de yenisi konuyor", symbol)
     for key, pos in state.positions.items():
         if key.split("|")[0] != symbol:
             continue
