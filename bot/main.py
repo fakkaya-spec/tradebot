@@ -19,8 +19,8 @@ from datetime import date, datetime, timedelta, timezone
 from .config import Config
 from .exchange import (adjust_quantity, assert_key_safety,
                        cancel_all_symbol_orders, current_funding_rate,
-                       fetch_net_positions, fetch_ohlcv_df, make_exchange,
-                       prepare_symbol)
+                       fetch_net_positions, fetch_net_transfers,
+                       fetch_ohlcv_df, make_exchange, prepare_symbol)
 from .indicators import add_indicators
 from .notifier import Notifier
 from .risk import MonthlyKillSwitch, RiskParams, position_size
@@ -142,8 +142,20 @@ def send_weekly_report(ex, cfg, notifier, state, marks, equity, now):
 
     prev_eq = state.week.get("equity")
     if prev_eq:
-        diff = equity - prev_eq
-        lines.append(f"Ozsermaye: {equity:,.2f} USDT (hafta: {diff:+,.2f} / {diff/prev_eq*100:+.1f}%)")
+        # Hafta ici yatirilan/cekilen para performans sayilmaz.
+        week_tr = 0.0
+        if not cfg.dry_run and state.week.get("date"):
+            try:
+                start_ms = int(datetime.fromisoformat(state.week["date"]).timestamp() * 1000)
+                week_tr = fetch_net_transfers(ex, start_ms)
+            except Exception as exc:
+                log.warning("haftalik transfer sorgusu basarisiz: %s", exc)
+        diff = equity - prev_eq - week_tr
+        base = prev_eq + max(week_tr, 0.0)
+        line = f"Ozsermaye: {equity:,.2f} USDT (hafta: {diff:+,.2f} / {diff/base*100:+.1f}%"
+        if abs(week_tr) >= 0.01:
+            line += f"; net transfer {week_tr:+,.0f} USDT haric"
+        lines.append(line + ")")
     else:
         lines.append(f"Ozsermaye: {equity:,.2f} USDT (ilk haftalik rapor)")
 
@@ -225,27 +237,50 @@ def place_market(ex, cfg, symbol, side, qty, reduce_only=False):
     ex.create_order(symbol, "market", side, qty, None, params)
 
 
-def sync_stop_order(ex, cfg, state, symbol):
+def sync_stop_order(ex, cfg, state, symbol, notifier=None):
     """Semboldeki stop emirlerini SIFIRDAN kurar: once cancel-all, sonra
     defterdeki her pozisyon icin tek STOP_MARKET.
 
     'Listele-bul-iptal et' yontemi kullanilmaz: bazi ccxt surumleri kosullu
     emirleri acik emir listesinde gostermiyor ve bu, stop birikmesine yol
     aciyordu. Cancel-all borsa tarafinda listeden bagimsiz calisir.
+
+    -2021 (Order would immediately trigger): fiyat stop seviyesini coktan
+    gecmis demektir. Eski stop az once iptal edildigi icin pozisyonu 4 saat
+    korumasiz birakmamak adina aninda piyasadan kapatilir (stop yenmis sayilir).
     """
     if cfg.dry_run:
         log.info("[DRY_RUN] %s stoplar senkronlanirdi", symbol)
         return
     if not cancel_all_symbol_orders(ex, symbol):
         log.warning("%s: eski stoplar iptal edilemedi, yine de yenisi konuyor", symbol)
-    for key, pos in state.positions.items():
+    for key, pos in list(state.positions.items()):
         if key.split("|")[0] != symbol:
             continue
         close_side = "sell" if pos["side"] == LONG else "buy"
-        # workingType=MARK_PRICE: tek barlik manipulatif igneler tetikleyemez.
-        ex.create_order(symbol, "STOP_MARKET", close_side, pos["qty"], None,
-                        {"stopPrice": pos["stop"], "reduceOnly": True,
-                         "workingType": "MARK_PRICE"})
+        try:
+            # workingType=MARK_PRICE: tek barlik manipulatif igneler tetikleyemez.
+            ex.create_order(symbol, "STOP_MARKET", close_side, pos["qty"], None,
+                            {"stopPrice": pos["stop"], "reduceOnly": True,
+                             "workingType": "MARK_PRICE"})
+        except Exception as exc:
+            if "-2021" not in str(exc):
+                raise
+            place_market(ex, cfg, symbol, close_side, pos["qty"], reduce_only=True)
+            pnl = pos["qty"] * (pos["stop"] - pos["entry"]) * (1 if pos["side"] == LONG else -1)
+            del state.positions[key]
+            until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
+            state.cooldowns[key] = {"side": pos["side"], "until": until.isoformat()}
+            state.history.append({
+                "symbol": symbol, "sleeve": key.split("|")[1], "side": pos["side"],
+                "entry": pos["entry"], "exit": pos["stop"], "qty": pos["qty"],
+                "pnl": pnl, "reason": "stop", "entry_time": pos.get("entry_time", ""),
+                "exit_time": datetime.now(timezone.utc).isoformat(),
+            })
+            if notifier:
+                notifier.send(f"KAPANDI {symbol} [{key.split('|')[1]}] {pos['side']} @ ~{pos['stop']:.4f} "
+                              f"| stop (fiyat stop seviyesini gecmisti, piyasadan kapatildi) "
+                              f"| PnL~{pnl:+.2f} USDT")
 
 
 def close_position(ex, cfg, notifier, state, key, pos, price, reason):
@@ -269,7 +304,7 @@ def close_position(ex, cfg, notifier, state, key, pos, price, reason):
         state.cooldowns[key] = {"side": pos["side"], "until": until.isoformat()}
     if not cfg.dry_run:
         try:
-            sync_stop_order(ex, cfg, state, symbol)
+            sync_stop_order(ex, cfg, state, symbol, notifier)
         except Exception as exc:
             log.warning("%s kapanis sonrasi stop senkronu: %s", symbol, exc)
     state.history.append({
@@ -308,7 +343,7 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
                 continue
             if new_stop != pos["stop"]:
                 pos["stop"] = new_stop
-                sync_stop_order(ex, cfg, state, symbol)
+                sync_stop_order(ex, cfg, state, symbol, notifier)
             continue
 
         if ks_tripped:
@@ -342,7 +377,7 @@ def process_symbol(ex, cfg, notifier, state, ks_tripped, symbol, params, risk, m
             "best": float(row.close), "entry_atr": float(row.atr),
             "entry_time": str(row.name),
         }
-        sync_stop_order(ex, cfg, state, symbol)
+        sync_stop_order(ex, cfg, state, symbol, notifier)
         notional = qty * float(row.close)
         risk_usdt = qty * abs(float(row.close) - stop)
         entry_price, atr = float(row.close), float(row.atr)
@@ -406,6 +441,8 @@ def main():
         kill_switch.month = (now0.year, now0.month)
         kill_switch.month_start_equity = state.ks["start_equity"]
         kill_switch.tripped = state.ks["tripped"]
+        kill_switch.net_transfers = state.ks.get("net_transfers", 0.0)
+        kill_switch.transfers_at_trip = state.ks.get("transfers_at_trip", 0.0)
 
     mode = "DRY_RUN" if cfg.dry_run else ("TESTNET" if cfg.testnet else "CANLI")
     notifier.send(f"Bot basladi [{mode}] semboller: {', '.join(cfg.symbols)}")
@@ -420,14 +457,31 @@ def main():
             reconcile_state(ex, cfg, notifier, state)
             equity = get_equity(ex, cfg, state)
 
+            # Ay ici net transfer (yatirilan/cekilen) zarar-kar hesabindan ayrilir.
+            month_start_ms = int(datetime(now.year, now.month, 1,
+                                          tzinfo=timezone.utc).timestamp() * 1000)
+            if cfg.dry_run:
+                transfers = 0.0
+            else:
+                try:
+                    transfers = fetch_net_transfers(ex, month_start_ms)
+                except Exception as exc:
+                    log.warning("transfer sorgusu basarisiz, son bilinen deger kullaniliyor: %s", exc)
+                    transfers = kill_switch.net_transfers
+
             # Ay kapanisi: rapor + taban tamamlama talimati (nihai para yonetimi)
             prev_month = kill_switch.month
             prev_start = kill_switch.month_start_equity
+            prev_transfers = kill_switch.net_transfers
             if prev_month is not None and (now.year, now.month) != prev_month:
-                pnl = equity - prev_start
-                pct = pnl / prev_start * 100 if prev_start else 0.0
+                pnl = equity - prev_start - prev_transfers
+                base = prev_start + max(prev_transfers, 0.0)
+                pct = pnl / base * 100 if base else 0.0
                 lines = [f"AY KAPANDI {prev_month[0]}-{prev_month[1]:02d}: "
                          f"{prev_start:,.2f} -> {equity:,.2f} USDT ({pnl:+,.2f} / {pct:+.1f}%)"]
+                if abs(prev_transfers) >= 0.01:
+                    lines.append(f"(ay ici net transfer {prev_transfers:+,.2f} USDT "
+                                 "kar/zarar hesabina DAHIL EDILMEDI)")
                 if cfg.capital_base > 0:
                     if equity < cfg.capital_base:
                         lines.append(f"TABAN KONTROLU: cepten {cfg.capital_base - equity:,.2f} USDT "
@@ -438,14 +492,24 @@ def main():
                                      "- DOKUNMA, bilesik calissin.")
                 notifier.send("\n".join(lines))
 
-            if kill_switch.update(now, equity):
-                notifier.send(f"KILL-SWITCH: aylik zarar limiti asildi (ozsermaye {equity:.2f}). "
-                              "Tum pozisyonlar kapatiliyor, ay sonuna kadar islem yok.")
+            was_tripped = kill_switch.tripped
+            if kill_switch.update(now, equity, transfers):
+                notifier.send(
+                    f"KILL-SWITCH: aylik zarar limiti asildi. "
+                    f"Taban: ay basi {kill_switch.month_start_equity:,.2f} "
+                    f"+ net transfer {transfers:+,.2f} = {kill_switch.effective_start():,.2f} USDT; "
+                    f"ozsermaye {equity:,.2f}. "
+                    "Tum pozisyonlar kapatiliyor, ay sonuna kadar islem yok.")
                 for key in list(state.positions):
                     pos = state.positions[key]
                     symbol = key.split("|")[0]
                     price = marks.get(symbol) or float(ex.fetch_ticker(symbol)["last"])
                     close_position(ex, cfg, notifier, state, key, pos, price, "kill-switch")
+            elif was_tripped and not kill_switch.tripped:
+                notifier.send(
+                    "KILL-SWITCH GERI ALINDI: para yatirma/cekme duzeltmesi sonrasi aylik "
+                    f"sonuc limitin icinde (taban {kill_switch.effective_start():,.2f}, "
+                    f"ozsermaye {equity:,.2f}). Bot normal islemeye devam ediyor.")
             for symbol in cfg.symbols:
                 try:
                     process_symbol(ex, cfg, notifier, state, kill_switch.tripped,
@@ -458,7 +522,9 @@ def main():
             if kill_switch.month:
                 state.ks = {"month": list(kill_switch.month),
                             "start_equity": kill_switch.month_start_equity,
-                            "tripped": kill_switch.tripped}
+                            "tripped": kill_switch.tripped,
+                            "net_transfers": kill_switch.net_transfers,
+                            "transfers_at_trip": kill_switch.transfers_at_trip}
             state.save()
             # Kritik tarih hatirlatmalari: son 7 gun boyunca gunde bir kez
             if now.hour == cfg.heartbeat_hour:

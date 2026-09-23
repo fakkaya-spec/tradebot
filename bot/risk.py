@@ -50,22 +50,44 @@ def position_size(
 
 class MonthlyKillSwitch:
     """Ay basindaki ozsermayeye gore aylik zarar limiti. Limit asilirsa ay
-    sonuna kadar yeni giris yapilmaz (acik pozisyonlar kapatilir)."""
+    sonuna kadar yeni giris yapilmaz (acik pozisyonlar kapatilir).
+
+    Para yatirma/cekme zarar-kar DEGILDIR: ay ici net transfer (net_transfers)
+    tabana eklenir, boylece cekilen para zarar, yatirilan para kar sayilmaz.
+    Yanlis tetikleme (ornegin para cekiminin zarar sanilmasi) sonradan gelen
+    transfer bilgisiyle geri alinir; transfer yokken geri alma olmaz."""
 
     def __init__(self, limit: float):
         self.limit = limit
         self.month = None
         self.month_start_equity = None
+        self.net_transfers = 0.0      # ay ici net yatirilan(+)/cekilen(-)
+        self.transfers_at_trip = 0.0  # tetiklenme anindaki transfer bilgisi
         self.tripped = False
 
-    def update(self, ts, equity: float) -> bool:
+    def effective_start(self) -> float:
+        """Transfer duzeltmeli taban: ay basi + ay ici net transfer."""
+        return (self.month_start_equity or 0.0) + self.net_transfers
+
+    def update(self, ts, equity: float, net_transfers: float = 0.0) -> bool:
         """Yeni ozsermaye ile gunceller; bu cagriyla tetiklendiyse True doner."""
         key = (ts.year, ts.month)
         if key != self.month:
             self.month = key
             self.month_start_equity = equity
+            self.net_transfers = 0.0
+            self.transfers_at_trip = 0.0
             self.tripped = False
-        if not self.tripped and equity <= self.month_start_equity * (1 - self.limit):
+            return False
+        self.net_transfers = net_transfers
+        start = self.effective_start()
+        if start <= 0:
+            return False
+        threshold = start * (1 - self.limit)
+        if self.tripped and net_transfers != self.transfers_at_trip and equity > threshold:
+            self.tripped = False
+        if not self.tripped and equity <= threshold:
             self.tripped = True
+            self.transfers_at_trip = net_transfers
             return True
         return False

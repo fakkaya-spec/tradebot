@@ -173,6 +173,30 @@ def fetch_ohlcv_df(ex, symbol: str, timeframe: str, limit: int = 300):
     return df.iloc[:-1]
 
 
+TRANSFER_INCOME_TYPES = {"TRANSFER", "INTERNAL_TRANSFER", "WELCOME_BONUS"}
+
+
+def fetch_net_transfers(ex, start_ms: int) -> float:
+    """start_ms'ten bu yana USDT-M cuzdanina NET yatirilan/cekilen toplam.
+
+    Pozitif = para yatirilmis, negatif = para cekilmis. Kaynak, livereport ile
+    ayni income kayitlaridir; kill-switch ve raporlar bu tutari zarar/kar
+    hesabindan ayirmak icin kullanir.
+    """
+    total, cursor = 0.0, start_ms
+    while True:
+        batch = ex.fapiPrivateGetIncome({"startTime": cursor, "limit": 1000})
+        if not batch:
+            break
+        for r in batch:
+            if r.get("incomeType") in TRANSFER_INCOME_TYPES:
+                total += float(r["income"])
+        if len(batch) < 1000:
+            break
+        cursor = int(batch[-1]["time"]) + 1
+    return total
+
+
 def current_funding_rate(ex, symbol: str) -> float:
     try:
         fr = ex.fetch_funding_rate(symbol)
