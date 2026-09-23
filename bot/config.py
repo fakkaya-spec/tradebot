@@ -49,9 +49,12 @@ class Config:
     adx_period: int = 14
     adx_threshold: float = float(os.getenv("ADX_THRESHOLD", "25"))
     atr_period: int = 14
-    stop_atr: float = 2.0
-    breakeven_atr: float = 1.5
-    trail_atr: float = 3.0
+    # 23 Eyl 2026 stop taramasi: be=1.0 adayi holdout'ta +84.7%/MAR 1.72 ile
+    # mevcudu (+43.1%/0.82) net gecti; karar 5 Kasim degerlendirmesinde.
+    # O gun onaylanirsa Railway'de BREAKEVEN_ATR=1.0 yazmak yeterli.
+    stop_atr: float = float(os.getenv("STOP_ATR", "2.0"))
+    breakeven_atr: float = float(os.getenv("BREAKEVEN_ATR", "1.5"))
+    trail_atr: float = float(os.getenv("TRAIL_ATR", "3.0"))
     donchian_entry: int = 120  # 4h barda 20 gun
     donchian_exit: int = 60    # 4h barda 10 gun
     ema_macro: int = 200       # makro yon filtresi (~33 gun): ustunde sadece long, altinda sadece short
