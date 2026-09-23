@@ -156,6 +156,12 @@ def main():
                     result = run_window(vcfg, data, funding, ws, we, args.equity)
                     print(compact_line(f"be={cfg.breakeven_atr:.1f} tr={cfg.trail_atr:.1f} "
                                        f"s={s:.1f}", result))
+                # Ilk taramanin iki kazananinin (erken basabas + genis ilk stop)
+                # birlesimi: etkilesim var mi?
+                for be, tr, s in ((1.0, 3.0, 2.5), (1.0, 5.0, 2.5)):
+                    vcfg = dataclasses.replace(cfg, breakeven_atr=be, trail_atr=tr, stop_atr=s)
+                    result = run_window(vcfg, data, funding, ws, we, args.equity)
+                    print(compact_line(f"be={be:.1f} tr={tr:.1f} s={s:.1f} (kombo)", result))
             print()
             return
         if args.sweep:
