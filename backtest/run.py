@@ -105,6 +105,9 @@ def main():
     ap.add_argument("--compare", action="store_true", help="--holdout ile: v1 ve v2'yi yan yana karsilastir")
     ap.add_argument("--sweep", action="store_true",
                     help="--holdout ile: risk/kill-switch kombinasyonlarini tara")
+    ap.add_argument("--sweep-stops", action="store_true",
+                    help="--holdout ile: basabas/iz suren/ilk stop kombinasyonlarini tara "
+                         "(igne dayanikliligi deneyi)")
     ap.add_argument("--timeframe", default=None,
                     help="mum periyodu, orn. 1h (varsayilan: 4h). Ayni bar-parametreleriyle "
                          "daha kisa periyot = daha hizli/sik islem yapan varyant")
@@ -133,6 +136,28 @@ def main():
         holdout_ts = pd.Timestamp(args.holdout, tz="UTC")
         windows = [("EGITIM DONEMI (strateji bu veriyle tasarlandi)", None, holdout_ts),
                    ("GORULMEMIS DONEM (holdout - asil sinav)", holdout_ts, None)]
+        if args.sweep_stops:
+            # Igne dayanikliligi: be = basabas esigi (xATR, buyudukce stop girise
+            # GEC cekilir), tr = iz suren mesafe (xATR, buyudukce genis nefes),
+            # s = ilk stop (xATR). be=9.9 fiilen "basabas/iz surme kapali" demektir.
+            print("\n  STOP TARAMASI  (MAR = CAGR / |MaxDD| - yuksek olan iyi)")
+            for wtitle, ws, we in windows:
+                print(f"\n  {wtitle}")
+                base = run_window(cfg, data, funding, ws, we, args.equity)
+                print(compact_line(f"MEVCUT be={cfg.breakeven_atr:.1f} tr={cfg.trail_atr:.1f} "
+                                   f"s={cfg.stop_atr:.1f}", base))
+                for be in (1.0, 2.0, 2.5, 9.9):
+                    for tr in (3.0, 4.0, 5.0):
+                        vcfg = dataclasses.replace(cfg, breakeven_atr=be, trail_atr=tr)
+                        result = run_window(vcfg, data, funding, ws, we, args.equity)
+                        print(compact_line(f"be={be:.1f} tr={tr:.1f} s={cfg.stop_atr:.1f}", result))
+                for s in (2.5, 3.0):
+                    vcfg = dataclasses.replace(cfg, stop_atr=s)
+                    result = run_window(vcfg, data, funding, ws, we, args.equity)
+                    print(compact_line(f"be={cfg.breakeven_atr:.1f} tr={cfg.trail_atr:.1f} "
+                                       f"s={s:.1f}", result))
+            print()
+            return
         if args.sweep:
             risks = [0.0075, 0.01, 0.015, 0.02, 0.03]
             kills = [0.08, 0.12]
