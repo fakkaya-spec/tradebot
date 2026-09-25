@@ -86,26 +86,50 @@ def stma_trend(df: pd.DataFrame, mav: str, length: int, atr_period: int,
 
 
 def run_symbol(df: pd.DataFrame, mav: str, length: int, atr_period: int,
-               mult: float, warmup: int):
-    """Tek sembol: strateji carpani egrisi (1.0'dan baslar) + islem kayitlari."""
-    c = df["close"].values
+               mult: float, warmup: int, lev: float = 1.0, funding=None):
+    """Tek sembol: strateji carpani egrisi (1.0'dan baslar) + islem kayitlari.
+
+    lev > 1 vadeli modeli: getiri ve komisyon nominalden (x lev), acik long
+    funding oder, bar dibinde kasa ~sifira inerse LIKIDASYON (kasa silinir).
+    """
+    c, l = df["close"].values, df["low"].values
     trend = stma_trend(df, mav, length, atr_period, mult)
+
+    # Her funding olayini kapsayan bara yaz (bar i: [t_i, t_{i+1}) araligi)
+    fund = np.zeros(len(c))
+    if funding is not None and lev != 1.0 and len(funding):
+        j = df.index.searchsorted(funding.index, side="right") - 1
+        for k, rate in zip(j, funding.values):
+            if 0 <= k < len(c):
+                fund[k] += float(rate)
+
     eq, pos, entry_eq, entry_ts = 1.0, False, 1.0, None
     curve = np.ones(len(c))
     trades = []
+    dead = False
     for i in range(len(c)):
-        if i < warmup:
+        if i < warmup or dead:
             curve[i] = eq
             continue
         if pos:
-            eq *= c[i] / c[i - 1]
+            low_eq = eq * (1.0 + lev * (l[i] / c[i - 1] - 1.0))
+            if lev > 1.0 and low_eq <= entry_eq * 0.01:
+                # Likidasyon: bar dibinde teminat bitti - kasa silindi.
+                trades.append({"entry": entry_ts, "exit": df.index[i],
+                               "entry_px": entry_px, "exit_px": l[i],
+                               "ret": -1.0, "liq": True})
+                eq, pos, dead = 1e-9, False, True
+                curve[i] = eq
+                continue
+            eq *= 1.0 + lev * (c[i] / c[i - 1] - 1.0)
+            eq *= 1.0 - lev * fund[i]  # long, pozitif funding oder
         flip_up = trend[i] == 1 and trend[i - 1] == -1
         flip_dn = trend[i] == -1 and trend[i - 1] == 1
         if not pos and flip_up:
-            eq *= 1.0 - COST
+            eq *= 1.0 - COST * lev
             pos, entry_eq, entry_ts, entry_px = True, eq, df.index[i], c[i]
         elif pos and flip_dn:
-            eq *= 1.0 - COST
+            eq *= 1.0 - COST * lev
             trades.append({"entry": entry_ts, "exit": df.index[i],
                            "entry_px": entry_px, "exit_px": c[i],
                            "ret": eq / entry_eq - 1})
@@ -149,6 +173,9 @@ def main():
     ap.add_argument("--holdout", default="2025-01-01")
     ap.add_argument("--monthly", action="store_true", help="ay ay getiri tablosu da bas")
     ap.add_argument("--trades", action="store_true", help="islemleri tek tek listele")
+    ap.add_argument("--leverage", type=float, default=1.0,
+                    help="vadeli modeli: getiri/komisyon x lev, funding odenir, "
+                         "likidasyon riski gercek olur (orn. 3)")
     args = ap.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",")]
@@ -161,9 +188,10 @@ def main():
 
         curves, all_trades, per_sym = {}, [], {}
         for sym in symbols:
-            k, _ = data_mod.load(sym, tf, args.days + extra_days)
+            k, f = data_mod.load(sym, tf, args.days + extra_days)
             curve, trades = run_symbol(k, args.mav, args.length,
-                                       args.atr_period, args.mult, warmup)
+                                       args.atr_period, args.mult, warmup,
+                                       lev=args.leverage, funding=f)
             for t in trades:
                 t["symbol"] = sym
             curves[sym], per_sym[sym] = curve, len(trades)
@@ -180,8 +208,9 @@ def main():
 
         line = "=" * 74
         print(line)
+        lev_tag = f"  {args.leverage:g}x KALDIRAC (funding+likidasyon dahil)" if args.leverage != 1.0 else ""
         print(f"  STMA [{args.mav}{args.length} +/- {args.mult}xATR({args.atr_period})]  "
-              f"{tf}  long-only  {', '.join(symbols)}")
+              f"{tf}  long-only  {', '.join(symbols)}{lev_tag}")
         print(line)
         far = pd.Timestamp.max.tz_localize("UTC")
         print("  TUM DONEM :", window_stats(total, all_trades, total.index[0], far, args.equity))
@@ -189,6 +218,10 @@ def main():
         print("  HOLDOUT   :", window_stats(total, all_trades, holdout_ts, far, args.equity))
         print(f"  Son deger : {total.iloc[-1]:,.0f} USDT (baslangic {args.equity:,.0f}) | "
               f"islem/sembol: {', '.join(f'{k}:{v}' for k, v in per_sym.items())}")
+        liqs = [t for t in all_trades if t.get("liq")]
+        if liqs:
+            print(f"  !!! LIKIDASYON: {len(liqs)} kasa silindi -> "
+                  + ", ".join(f"{t['symbol']} {t['exit'].strftime('%Y-%m-%d')}" for t in liqs))
         if args.trades:
             print("  Islemler (giris -> cikis, maliyetler dahil):")
             for t in sorted(all_trades, key=lambda x: x["entry"]):
