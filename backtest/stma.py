@@ -103,16 +103,18 @@ def run_symbol(df: pd.DataFrame, mav: str, length: int, atr_period: int,
         flip_dn = trend[i] == -1 and trend[i - 1] == 1
         if not pos and flip_up:
             eq *= 1.0 - COST
-            pos, entry_eq, entry_ts = True, eq, df.index[i]
+            pos, entry_eq, entry_ts, entry_px = True, eq, df.index[i], c[i]
         elif pos and flip_dn:
             eq *= 1.0 - COST
             trades.append({"entry": entry_ts, "exit": df.index[i],
+                           "entry_px": entry_px, "exit_px": c[i],
                            "ret": eq / entry_eq - 1})
             pos = False
         curve[i] = eq
     if pos:  # acik pozisyonu son barda kapat (rapor icin)
         trades.append({"entry": entry_ts, "exit": df.index[-1],
-                       "ret": eq / entry_eq - 1})
+                       "entry_px": entry_px, "exit_px": c[-1],
+                       "ret": eq / entry_eq - 1, "open": True})
     return pd.Series(curve, index=df.index), trades
 
 
@@ -146,6 +148,7 @@ def main():
     ap.add_argument("--mult", type=float, default=0.5)
     ap.add_argument("--holdout", default="2025-01-01")
     ap.add_argument("--monthly", action="store_true", help="ay ay getiri tablosu da bas")
+    ap.add_argument("--trades", action="store_true", help="islemleri tek tek listele")
     args = ap.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",")]
@@ -161,6 +164,8 @@ def main():
             k, _ = data_mod.load(sym, tf, args.days + extra_days)
             curve, trades = run_symbol(k, args.mav, args.length,
                                        args.atr_period, args.mult, warmup)
+            for t in trades:
+                t["symbol"] = sym
             curves[sym], per_sym[sym] = curve, len(trades)
             all_trades.extend(trades)
 
@@ -184,6 +189,14 @@ def main():
         print("  HOLDOUT   :", window_stats(total, all_trades, holdout_ts, far, args.equity))
         print(f"  Son deger : {total.iloc[-1]:,.0f} USDT (baslangic {args.equity:,.0f}) | "
               f"islem/sembol: {', '.join(f'{k}:{v}' for k, v in per_sym.items())}")
+        if args.trades:
+            print("  Islemler (giris -> cikis, maliyetler dahil):")
+            for t in sorted(all_trades, key=lambda x: x["entry"]):
+                gun = (t["exit"] - t["entry"]).days
+                tag = "  [HALA ACIK]" if t.get("open") else ""
+                print(f"    {t['symbol']:<8} {t['entry'].strftime('%Y-%m-%d')} @ "
+                      f"{t['entry_px']:>10,.2f} -> {t['exit'].strftime('%Y-%m-%d')} @ "
+                      f"{t['exit_px']:>10,.2f}  ({gun:>4} gun)  {t['ret']*100:+7.1f}%{tag}")
         if args.monthly:
             monthly = total.resample("ME").last()
             rets = monthly.pct_change()
