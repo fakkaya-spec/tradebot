@@ -143,7 +143,11 @@ def main():
                     help="ayni sembol+yonde tek pozisyon (denetim 1.2 testi: "
                          "trend+breakout ust uste binmesin)")
     ap.add_argument("--quarterly", action="store_true",
-                    help="ceyrek ceyrek performans dokumu (walk-forward tarzi denetim)")
+                    help="pencere pencere performans dokumu (walk-forward tarzi denetim)")
+    ap.add_argument("--win-months", type=int, default=3,
+                    help="--quarterly pencere boyu (ay), orn. 6")
+    ap.add_argument("--perturb", action="store_true",
+                    help="--holdout ile: parametre hassasiyet testi (+-%%10 pertubasyon)")
     args = ap.parse_args()
 
     slippage_map = None
@@ -174,6 +178,26 @@ def main():
         holdout_ts = pd.Timestamp(args.holdout, tz="UTC")
         windows = [("EGITIM DONEMI (strateji bu veriyle tasarlandi)", None, holdout_ts),
                    ("GORULMEMIS DONEM (holdout - asil sinav)", holdout_ts, None)]
+        if args.perturb:
+            # Denetim 5.1/9: her parametre komsu degerlerde uçurum yapiyor mu?
+            # Saglam sistemde PF kademeli degisir, uçurum yapmaz.
+            variants = [("stop_atr", 1.8), ("stop_atr", 2.2),
+                        ("trail_atr", 2.7), ("trail_atr", 3.3),
+                        ("breakeven_atr", 1.35), ("breakeven_atr", 1.65),
+                        ("donchian_entry", 108), ("donchian_entry", 132),
+                        ("donchian_exit", 54), ("donchian_exit", 66),
+                        ("ema_fast", 18), ("ema_fast", 22),
+                        ("ema_slow", 45), ("ema_slow", 55)]
+            print("\n  PARAMETRE HASSASIYETI (+-%10; ucurum = kirilganlik)")
+            for wtitle, ws, we in windows:
+                print(f"\n  {wtitle}")
+                print(compact_line("MEVCUT", run_window(cfg, data, funding, ws, we, args.equity)))
+                for name, val in variants:
+                    vcfg = dataclasses.replace(cfg, **{name: val})
+                    print(compact_line(f"{name}={val:g}",
+                                       run_window(vcfg, data, funding, ws, we, args.equity)))
+            print()
+            return
         if args.sweep_stops:
             # Igne dayanikliligi: be = basabas esigi (xATR, buyudukce stop girise
             # GEC cekilir), tr = iz suren mesafe (xATR, buyudukce genis nefes),
@@ -243,15 +267,16 @@ def main():
                           slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
                           one_per_symbol=args.one_per_symbol)
         idx = full.equity_curve.index
-        print("\n  CEYREKLIK DOKUM (her ceyrek bagimsiz, 10k ile baslar)")
-        q = pd.Timestamp(idx[0].year, ((idx[0].quarter - 1) * 3) + 1, 1, tz="UTC")
+        wm = max(1, args.win_months)
+        print(f"\n  PENCERE DOKUMU ({wm} aylik, her pencere bagimsiz 10k ile baslar)")
+        q = pd.Timestamp(idx[0].year, ((idx[0].month - 1) // wm) * wm + 1, 1, tz="UTC")
         while q < idx[-1]:
-            q_end = q + pd.offsets.QuarterBegin(startingMonth=1)
+            q_end = q + pd.DateOffset(months=wm)
             r = run_window(cfg, data, funding, q, q_end, args.equity,
                            slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
                            one_per_symbol=args.one_per_symbol)
             if len(r.equity_curve) > 10:
-                print(compact_line(f"{q.year}-Q{q.quarter}", r))
+                print(compact_line(q.strftime("%Y-%m"), r))
             q = q_end
         print()
         return
