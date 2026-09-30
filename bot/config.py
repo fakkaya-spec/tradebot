@@ -66,6 +66,7 @@ class Config:
     enable_regime: bool = _bool("ENABLE_REGIME", "false")        # rejim bazli kol kapilama
     enable_meanrev: bool = _bool("ENABLE_MEANREV", "false")      # yatay rejimde ortalamaya donus kolu
     enable_vol_target: bool = _bool("ENABLE_VOL_TARGET", "true")  # volatiliteye gore boyut olcekleme
+    vol_median_shift: bool = _bool("VOL_MEDIAN_SHIFT", "false")   # medyan mevcut bari dislar (denetim 2.2)
 
     # Kol ac/kapa bayraklari (deney icin; canli varsayilan: trend+breakout)
     enable_trend: bool = _bool("ENABLE_TREND", "true")

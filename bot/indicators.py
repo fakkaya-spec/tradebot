@@ -86,6 +86,10 @@ def add_indicators(df: pd.DataFrame, cfg) -> pd.DataFrame:
     # Volatilite hedeflemesi: goreli ATR kendi medyaninin ustundeyse boyut kucultulur
     rel_atr = df["atr"] / c
     med = rel_atr.rolling(cfg.vol_window).median()
+    # VOL_MEDIAN_SHIFT: medyan mevcut bari DISLAR (dis denetim bulgusu 2.2 -
+    # mevcut barin medyana girmesi kucuk bir ayni-bar sizintisidir)
+    if getattr(cfg, "vol_median_shift", False):
+        med = med.shift(1)
     df["vol_scale"] = (med / rel_atr).clip(0.5, 1.5).fillna(1.0)
 
     # Supertrend kolu (varsayilan kapali; ENABLE_SUPERTREND ile acilir)

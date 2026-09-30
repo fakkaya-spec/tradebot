@@ -41,13 +41,15 @@ def slice_window(data, funding, start, end, wu_days):
     return d, f
 
 
-def run_window(cfg, data, funding, start, end, equity, spot=False, long_only=False):
+def run_window(cfg, data, funding, start, end, equity, spot=False, long_only=False,
+               slippage_map=None, stop_slip_extra=0.0):
     d, f = slice_window(data, funding, start, end, warmup_days(cfg.timeframe))
     if spot:
         cfg = dataclasses.replace(cfg, max_leverage=1.0)
         return Backtester(d, f, cfg, start_equity=equity,
                           taker_fee=0.001, long_only=True, apply_funding=False).run()
-    return Backtester(d, f, cfg, start_equity=equity, long_only=long_only).run()
+    return Backtester(d, f, cfg, start_equity=equity, long_only=long_only,
+                      slippage_map=slippage_map, stop_slip_extra=stop_slip_extra).run()
 
 
 def print_report(m: dict, result, symbols, title):
@@ -63,6 +65,10 @@ def print_report(m: dict, result, symbols, title):
     print(f"  Islem sayisi        : {m['islem_sayisi']}")
     print(f"  Kazanma orani       : {m['kazanma_orani']*100:.1f}%")
     print(f"  Profit factor       : {m['profit_factor']:.2f}")
+    daily = result.equity_curve.resample("D").last().dropna()
+    if len(daily) > 1:
+        worst = daily.pct_change().min()
+        print(f"  En kotu tek gun     : {worst*100:+.1f}%")
     if m["funding_tahmini_mi"]:
         print("  ! Funding verisi eksikti, sabit 0.01%/8h varsayildi.")
     print(line)
@@ -82,7 +88,10 @@ def print_report(m: dict, result, symbols, title):
     for sym in symbols:
         ts_ = [t for t in result.trades if t.symbol == sym]
         pnl = sum(t.pnl for t in ts_)
-        print(f"    {sym:<9} islem={len(ts_):>3}  PnL={pnl:+10.2f} USDT")
+        wins = sum(t.pnl for t in ts_ if t.pnl > 0)
+        losses = abs(sum(t.pnl for t in ts_ if t.pnl < 0))
+        pf = wins / losses if losses else float("inf")
+        print(f"    {sym:<9} islem={len(ts_):>3}  PnL={pnl:+10.2f} USDT  PF={pf:.2f}")
     print(line)
 
 
@@ -115,13 +124,29 @@ def main():
                     help="spot modu: long-only, kaldiracsiz, funding yok, %%0.1 komisyon")
     ap.add_argument("--long-only", action="store_true",
                     help="futures kosullari AYNEN korunur, sadece short girisleri atlanir")
+    ap.add_argument("--slip", default=None,
+                    help="sembol bazli kayma, orn. 'SOLUSDT=0.0008,ETHUSDT=0.0004' "
+                         "(belirtilmeyenler varsayilan %%0.03)")
+    ap.add_argument("--stop-slip", type=float, default=0.0,
+                    help="stop fill'lerine EK kayma (flash-crash stresi), orn. 0.003")
+    ap.add_argument("--vol-shift", action="store_true",
+                    help="vol-hedefleme medyani mevcut bari dislar (denetim 2.2 duzeltmesi)")
     args = ap.parse_args()
+
+    slippage_map = None
+    if args.slip:
+        slippage_map = {}
+        for part in args.slip.split(","):
+            sym, val = part.split("=")
+            slippage_map[sym.strip()] = float(val)
 
     cfg = Config()
     if args.legacy:
         cfg = legacy_cfg(cfg)
     if args.timeframe:
         cfg = dataclasses.replace(cfg, timeframe=args.timeframe)
+    if args.vol_shift:
+        cfg = dataclasses.replace(cfg, vol_median_shift=True)
     symbols = [s.strip() for s in args.symbols.split(",")]
 
     data, funding = {}, {}
@@ -190,14 +215,16 @@ def main():
             return
         for wtitle, ws, we in windows:
             result = run_window(cfg, data, funding, ws, we, args.equity,
-                                spot=args.spot, long_only=args.long_only)
+                                spot=args.spot, long_only=args.long_only,
+                                slippage_map=slippage_map, stop_slip_extra=args.stop_slip)
             print_report(metrics(result), result, symbols,
                          wtitle + (" [SPOT long-only]" if args.spot else "")
                          + (" [LONG-ONLY futures]" if args.long_only else ""))
         return
 
     result = run_window(cfg, data, funding, None, None, args.equity,
-                        spot=args.spot, long_only=args.long_only)
+                        spot=args.spot, long_only=args.long_only,
+                        slippage_map=slippage_map, stop_slip_extra=args.stop_slip)
     variant = ("SPOT long-only" if args.spot
                else ("LONG-ONLY futures" if args.long_only
                      else ("v1 (legacy)" if args.legacy else "v2")))
