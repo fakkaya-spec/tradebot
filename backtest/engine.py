@@ -72,6 +72,7 @@ class Result:
     trades: list = field(default_factory=list)
     start_equity: float = 0.0
     funding_estimated: bool = False
+    funding_total: float = 0.0  # kapanan islemlerde odenen net funding (+ = odendi)
 
 
 class Backtester:
@@ -90,6 +91,8 @@ class Backtester:
         self.apply_funding = apply_funding
         self.slippage_map = slippage_map or {}
         self.stop_slip_extra = stop_slip_extra
+        # Denetim 1.2 testi: ayni sembol+yonde ikinci kol pozisyon ACAMAZ
+        self.one_per_symbol_side = False
         self.cfg = cfg
         self.params = StrategyParams(cfg.adx_threshold, cfg.stop_atr, cfg.breakeven_atr,
                                      cfg.trail_atr, enable_regime=cfg.enable_regime,
@@ -110,6 +113,7 @@ class Backtester:
         self.cash = start_equity
         self.positions = {}  # (symbol, sleeve) -> Position
         self.trades = []
+        self.funding_total = 0.0
         self.kill_switch = MonthlyKillSwitch(cfg.monthly_kill_switch)
 
     # --- yardimcilar ---------------------------------------------------
@@ -142,6 +146,7 @@ class Backtester:
         gross = pos.qty * (fill - pos.entry) * direction
         fees = pos.qty * (pos.entry + fill) * self.taker_fee
         pnl = gross - fees - pos.funding_paid
+        self.funding_total += pos.funding_paid
         self.cash += gross - pos.qty * fill * self.taker_fee  # giris komisyonu aciliste dusuldu
         self.trades.append(Trade(pos.symbol, pos.sleeve, pos.side, pos.entry_time, ts,
                                  pos.entry, fill, pos.qty, pnl, reason))
@@ -152,6 +157,9 @@ class Backtester:
     def _try_open(self, symbol, sleeve, side, row, ts, equity, marks):
         cd = self.cooldowns.get((symbol, sleeve))
         if cd and cd[0] == side and ts < cd[1]:
+            return
+        if self.one_per_symbol_side and any(
+                p.symbol == symbol and p.side == side for p in self.positions.values()):
             return
         same_dir = sum(1 for p in self.positions.values() if p.side == side)
         if same_dir >= self.risk.max_same_direction:
@@ -256,7 +264,8 @@ class Backtester:
 
             equity_curve[ts] = self.cash + self._unrealized(marks)
 
-        return Result(pd.Series(equity_curve), self.trades, self.start_equity, self.funding_estimated)
+        return Result(pd.Series(equity_curve), self.trades, self.start_equity,
+                      self.funding_estimated, self.funding_total)
 
 
 def metrics(result: Result) -> dict:

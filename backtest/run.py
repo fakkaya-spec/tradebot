@@ -42,14 +42,16 @@ def slice_window(data, funding, start, end, wu_days):
 
 
 def run_window(cfg, data, funding, start, end, equity, spot=False, long_only=False,
-               slippage_map=None, stop_slip_extra=0.0):
+               slippage_map=None, stop_slip_extra=0.0, one_per_symbol=False):
     d, f = slice_window(data, funding, start, end, warmup_days(cfg.timeframe))
     if spot:
         cfg = dataclasses.replace(cfg, max_leverage=1.0)
         return Backtester(d, f, cfg, start_equity=equity,
                           taker_fee=0.001, long_only=True, apply_funding=False).run()
-    return Backtester(d, f, cfg, start_equity=equity, long_only=long_only,
-                      slippage_map=slippage_map, stop_slip_extra=stop_slip_extra).run()
+    bt = Backtester(d, f, cfg, start_equity=equity, long_only=long_only,
+                    slippage_map=slippage_map, stop_slip_extra=stop_slip_extra)
+    bt.one_per_symbol_side = one_per_symbol
+    return bt.run()
 
 
 def print_report(m: dict, result, symbols, title):
@@ -69,6 +71,12 @@ def print_report(m: dict, result, symbols, title):
     if len(daily) > 1:
         worst = daily.pct_change().min()
         print(f"  En kotu tek gun     : {worst*100:+.1f}%")
+    # Funding'in kar-zarara etkisi (denetim 4.3/B6: once olc, sonra kural koy)
+    ft = getattr(result, "funding_total", None)
+    if ft is not None:
+        gross_win = sum(t.pnl for t in result.trades if t.pnl > 0)
+        pay = ft / gross_win * 100 if gross_win else 0.0
+        print(f"  Funding toplami     : {-ft:+,.2f} USDT (brut karin %{abs(pay):.1f}'i)")
     if m["funding_tahmini_mi"]:
         print("  ! Funding verisi eksikti, sabit 0.01%/8h varsayildi.")
     print(line)
@@ -131,6 +139,11 @@ def main():
                     help="stop fill'lerine EK kayma (flash-crash stresi), orn. 0.003")
     ap.add_argument("--vol-shift", action="store_true",
                     help="vol-hedefleme medyani mevcut bari dislar (denetim 2.2 duzeltmesi)")
+    ap.add_argument("--one-per-symbol", action="store_true",
+                    help="ayni sembol+yonde tek pozisyon (denetim 1.2 testi: "
+                         "trend+breakout ust uste binmesin)")
+    ap.add_argument("--quarterly", action="store_true",
+                    help="ceyrek ceyrek performans dokumu (walk-forward tarzi denetim)")
     args = ap.parse_args()
 
     slippage_map = None
@@ -216,15 +229,37 @@ def main():
         for wtitle, ws, we in windows:
             result = run_window(cfg, data, funding, ws, we, args.equity,
                                 spot=args.spot, long_only=args.long_only,
-                                slippage_map=slippage_map, stop_slip_extra=args.stop_slip)
+                                slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
+                                one_per_symbol=args.one_per_symbol)
             print_report(metrics(result), result, symbols,
                          wtitle + (" [SPOT long-only]" if args.spot else "")
                          + (" [LONG-ONLY futures]" if args.long_only else ""))
         return
 
+    if args.quarterly:
+        # Walk-forward tarzi dokum: parametreler sabit oldugu icin yeniden
+        # optimizasyon yok - her ceyrek bagimsiz pencere olarak kosulur.
+        full = run_window(cfg, data, funding, None, None, args.equity,
+                          slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
+                          one_per_symbol=args.one_per_symbol)
+        idx = full.equity_curve.index
+        print("\n  CEYREKLIK DOKUM (her ceyrek bagimsiz, 10k ile baslar)")
+        q = pd.Timestamp(idx[0].year, ((idx[0].quarter - 1) * 3) + 1, 1, tz="UTC")
+        while q < idx[-1]:
+            q_end = q + pd.offsets.QuarterBegin(startingMonth=1)
+            r = run_window(cfg, data, funding, q, q_end, args.equity,
+                           slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
+                           one_per_symbol=args.one_per_symbol)
+            if len(r.equity_curve) > 10:
+                print(compact_line(f"{q.year}-Q{q.quarter}", r))
+            q = q_end
+        print()
+        return
+
     result = run_window(cfg, data, funding, None, None, args.equity,
                         spot=args.spot, long_only=args.long_only,
-                        slippage_map=slippage_map, stop_slip_extra=args.stop_slip)
+                        slippage_map=slippage_map, stop_slip_extra=args.stop_slip,
+                        one_per_symbol=args.one_per_symbol)
     variant = ("SPOT long-only" if args.spot
                else ("LONG-ONLY futures" if args.long_only
                      else ("v1 (legacy)" if args.legacy else "v2")))
