@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta, timezone
 from .config import Config
 from .exchange import (adjust_quantity, assert_key_safety,
                        cancel_all_symbol_orders, current_funding_rate,
-                       fetch_net_positions, fetch_net_transfers,
+                       fetch_exit_fill, fetch_net_positions, fetch_net_transfers,
                        fetch_ohlcv_df, make_exchange, prepare_symbol)
 from .indicators import add_indicators
 from .notifier import Notifier
@@ -73,6 +73,14 @@ class State:
         os.replace(tmp, self.path)
 
 
+def _entry_ms(pos) -> int:
+    """Pozisyonun giris zamani (ms). Kayit yoksa/okunamazsa son 7 gun."""
+    try:
+        return int(datetime.fromisoformat(pos["entry_time"]).timestamp() * 1000)
+    except (KeyError, TypeError, ValueError):
+        return int((datetime.now(timezone.utc) - timedelta(days=7)).timestamp() * 1000)
+
+
 def reconcile_state(ex, cfg, notifier, state):
     """Acilista bot defterini borsayla mutabakata cevirir.
 
@@ -96,13 +104,38 @@ def reconcile_state(ex, cfg, notifier, state):
                               "kayit korunuyor (islem yapilmadi).")
                 continue
             if abs(exchange_net) < 1e-12:
+                exit_px, exit_ms = None, None
+                try:
+                    since = min(_entry_ms(state.positions[k]) for k in keys)
+                    exit_px, exit_ms = fetch_exit_fill(
+                        ex, sym, state.positions[keys[0]]["side"],
+                        sum(state.positions[k]["qty"] for k in keys), since)
+                except Exception as exc:
+                    log.warning("%s cikis dolumu okunamadi: %s", sym, exc)
+                exit_time = (datetime.fromtimestamp(exit_ms / 1000, tz=timezone.utc)
+                             if exit_ms else datetime.now(timezone.utc))
+                lines = []
                 for k in keys:
                     pos = state.positions.pop(k)
                     until = datetime.now(timezone.utc) + timedelta(hours=4 * cfg.cooldown_bars)
                     state.cooldowns[k] = {"side": pos["side"], "until": until.isoformat()}
+                    px = exit_px if exit_px else pos["stop"]
+                    near_stop = abs(px - pos["stop"]) / pos["stop"] < 0.01
+                    reason = "stop" if near_stop else "borsada kapandi"
+                    if not exit_px:
+                        reason += " (fiyat tahmini)"
+                    pnl = pos["qty"] * (px - pos["entry"]) * (1 if pos["side"] == LONG else -1)
+                    state.history.append({
+                        "symbol": sym, "sleeve": k.split("|")[1], "side": pos["side"],
+                        "entry": pos["entry"], "exit": px, "qty": pos["qty"], "pnl": pnl,
+                        "reason": reason, "entry_time": pos.get("entry_time", ""),
+                        "exit_time": exit_time.isoformat(),
+                    })
+                    lines.append(f"KAPANDI {sym} [{k.split('|')[1]}] {pos['side']} @ {px:.4f} "
+                                 f"| {reason} | PnL~{pnl:+.2f} USDT")
                 cancel_all_symbol_orders(ex, sym)
-                notifier.send(f"MUTABAKAT {sym}: pozisyon bot cevrimdisiyken borsada kapanmis "
-                              "(muhtemelen stop). Kayit temizlendi, cooldown uygulandi.")
+                notifier.send(f"MUTABAKAT {sym}: pozisyon borsada kapanmis, deftere islendi.\n"
+                              + "\n".join(lines))
             elif abs(exchange_net - state_net) > 1e-9:
                 notifier.send(f"UYARI {sym}: borsa pozisyonu ({exchange_net:+.6f}) bot kaydiyla "
                               f"({state_net:+.6f}) uyusmuyor - manuel kontrol gerekli.")

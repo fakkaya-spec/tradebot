@@ -173,6 +173,32 @@ def fetch_ohlcv_df(ex, symbol: str, timeframe: str, limit: int = 300):
     return df.iloc[:-1]
 
 
+def fetch_exit_fill(ex, symbol: str, side: str, qty: float, since_ms: int):
+    """Borsada (stop vb.) kapanan pozisyonun gercek cikis fiyatini bulur.
+
+    Kapanis yonundeki EN YENI dolumlardan geriye dogru, kapanan toplam miktar
+    dolana kadar toplayip agirlikli ortalama fiyat dondurur. Ayni sembolde
+    daha once kapanmis baska bir kolun dolumlari boylece karismaz.
+    Donus: (fiyat, zaman_ms) ya da bulunamazsa (None, None).
+    """
+    close_side = "sell" if side == "long" else "buy"
+    trades = ex.fetch_my_trades(symbol, since=since_ms, limit=500)
+    fills = sorted((t for t in trades if t.get("side") == close_side),
+                   key=lambda t: t["timestamp"], reverse=True)
+    got, notional, last_ts = 0.0, 0.0, None
+    for t in fills:
+        amt = float(t["amount"])
+        take = min(amt, qty - got)
+        notional += take * float(t["price"])
+        got += take
+        last_ts = last_ts or t["timestamp"]
+        if got >= qty * 0.999:
+            break
+    if got <= 0:
+        return None, None
+    return notional / got, last_ts
+
+
 TRANSFER_INCOME_TYPES = {"TRANSFER", "INTERNAL_TRANSFER", "WELCOME_BONUS"}
 
 
